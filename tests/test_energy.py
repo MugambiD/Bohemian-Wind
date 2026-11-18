@@ -77,6 +77,19 @@ def test_wake_behind_a_turbine_and_none_beside_it():
         assess.design(wf, c, None, T, 1, fixed_xy=([99999.0], [0.0]))
 
 
+def test_given_positions_are_read_between_the_cells():
+    # a plane rising to the east: a position half-way between two cells stands at the mean of their heights and winds
+    c = climate()
+    g = tr.from_function(lambda x, y: 1500.0 + 0.05 * x, -1.5, 36.5, half_km=6, res=100)
+    wf = fields.wind_field(g, c, T.hub_m, "linear")
+    wf.mean_ws = wf.mean_ws * (1 + g.mesh()[0] / 50000.0)             # a wind that rises to the east as well
+    on = assess.design(wf, c, None, T, 2, rho_hub=1.0, fixed_xy=([1000.0, 1100.0], [0.0, 0.0]))["positions"]
+    mid = assess.design(wf, c, None, T, 1, rho_hub=1.0, fixed_xy=([1050.0], [0.0]))["positions"][0]
+    assert mid["ground_elev_m"] == pytest.approx(1552.5, abs=0.01) and mid["slope_pct"] == pytest.approx(5.0, abs=0.01)
+    assert on[0]["ground_elev_m"] == pytest.approx(1550.0, abs=0.01) and on[1]["ground_elev_m"] == pytest.approx(1555.0, abs=0.01)
+    assert mid["free_ws"] == pytest.approx((on[0]["free_ws"] + on[1]["free_ws"]) / 2, rel=1e-6)
+
+
 def test_placement_rules():
     rng = np.random.default_rng(0)
     xs, ys = rng.uniform(-3000, 3000, 4000), rng.uniform(-3000, 3000, 4000)
@@ -131,6 +144,19 @@ def test_design_on_a_hill_end_to_end():
         assess.design(wf, c, np.zeros_like(mask), T, 3)
     with pytest.raises(EnergyError):
         assess.design(wf, c, mask, Turbine("x", 4500, 163, 100), 3)             # wind field at another height
+    # a layout that leans on wind far above the mast's is called out, with what it is worth without the speed-up
+    # (seen on a real escarpment, where the atlas put the best positions far above the mast's wind)
+    assert (res["cautions"] != []) == (res["mast_wind_ceiling"]["change_pct"] < -10.0)
+    wf.ratio = 1.0 + (wf.ratio - 1.0) * 6.0
+    wf.mean_ws = wf.mast_mean_ws * (1.0 + (wf.mean_ws / wf.mast_mean_ws - 1.0) * 6.0)
+    res3 = assess.design(wf, c, None, T, 2, lt_factor=1.03, rho_hub=1.0, fixed_xy=([2500.0, 0.0], [0.0, 3000.0]))
+    hi = max(p["ratio_to_mast"] for p in res3["positions"])
+    drop = -res3["mast_wind_ceiling"]["change_pct"]
+    assert hi > 1.15 and drop > 10.0 and len(res3["cautions"]) == 1
+    assert f"{drop:.0f} % of the P50 rests on turbine positions being windier than the mast" in res3["cautions"][0]
+    assert f"would be {res3['mast_wind_ceiling']['p50_gwh']:.0f} GWh a year" in res3["cautions"][0]
+    flat = assess.design(flat_field(c), c, None, T, 2, rho_hub=1.0, fixed_xy=([0.0, 0.0], [0.0, 1500.0]))
+    assert flat["cautions"] == []                                               # nothing rests on mapped wind there
 
 
 def test_losses_and_uncertainty_arithmetic():

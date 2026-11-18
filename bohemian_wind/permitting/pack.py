@@ -151,9 +151,9 @@ the law requires. Turbine positions are indicative and may change.</div>
 <p>Met mast at {site['lat']:.6f}, {site['lon']:.6f} (WGS 84; UTM zone {mz['zone']}{mz['hemisphere']}, {mz['easting']:.0f} E,
 {mz['northing']:.0f} N){f", ground elevation about {site['elevation_m']:.0f} m" if site.get('elevation_m') is not None else ""}.
 Measured {_e(str(data.get('period', ['', ''])[0])[:10])} to {_e(str(data.get('period', ['', ''])[1])[:10])}:
-mean wind speed {data.get('mean_ws', float('nan')):.2f} m/s at {data.get('top_height_m', 0):g} m, {data.get('recovery_pct', 0):.1f} % valid data
+mean wind speed {data.get('mean_ws', float('nan')):.2f} m/s at {data.get('top_height_m', 0):g} m over all valid records{f" ({data['momm_ws']:.2f} m/s as the mean of monthly means)" if data.get('momm_ws') else ""}, {data.get('recovery_pct', 0):.1f} % valid data
 ({_e(data.get('format', ''))}).
-{f"Long-term correction factor {lt['factor']:.3f} from {lt['months']} concurrent months (r = {lt['r']:.2f}), giving {lt['long_term']:.2f} m/s." if lt else "No long-term correction was applied."}</p>""")
+{f"Long-term mean {lt['long_term']:.2f} m/s at {lt['height_m']:g} m: the mean of the {lt['months']} months used, {lt['measured']:.2f} m/s, times a long-term factor of {lt['factor']:.3f} (monthly correlation r = {lt['r']:.2f})." if lt else "No long-term correction was applied."}</p>""")
     if (out_dir / "map_layout.png").is_file():
         sec.append("<h2>2. Layout</h2><img class='map' src='map_layout.png' alt='Layout map'>")
     sec.append("<h3>Turbine positions</h3>" + _table(
@@ -173,6 +173,10 @@ mean wind speed {data.get('mean_ws', float('nan')):.2f} m/s at {data.get('top_he
         ["P75 / P90, 10-year average", f"{u['p75_10_year']:.0f} / {u['p90_10_year']:.0f} GWh a year"],
         ["P90, any single year", f"{u['p90_1_year']:.0f} GWh"]])}
 <p>{_e(lay['estimate_note'])}</p>""")
+    checks = list(dict.fromkeys((lay.get("warnings") or []) + ((lt or {}).get("cautions") or [])))
+    if checks:
+        sec.append("<div class='flag'><b>Check before relying on these figures</b><ul>"
+                   + "".join(f"<li>{_e(c)}</li>" for c in checks) + "</ul></div>")
     n = 5
     if env:
         nz, fl = env["noise"], env["flicker"]

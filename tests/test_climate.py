@@ -88,3 +88,84 @@ def test_round_trip(tmp_path):
     cl.save(tmp_path / "climate.json", c)
     assert cl.load(tmp_path / "climate.json") == c
     assert len(cl.monthly_series(c)) >= 2
+
+
+def test_shear_pair_must_be_far_enough_apart_and_odd_exponents_are_flagged():
+    import pandas as pd
+    # two cups 4 m apart near the top: the pair below them carries the shear instead
+    means = pd.Series({60.0: 7.10, 90.0: 7.62, 116.0: 8.02, 120.0: 8.05})
+    sh = {"heights": [60.0, 90.0, 116.0, 120.0], "means": means, "alpha_top_bottom": 0.18, "lo": 60.0, "hi": 120.0,
+          "top_pair": (116.0, 120.0), "alpha_top_pair": float(np.log(8.05 / 8.02) / np.log(120 / 116))}
+    alpha, basis = cl.extrapolation_shear(sh)
+    assert basis == "90-120 m pair" and alpha == pytest.approx(np.log(8.05 / 7.62) / np.log(120 / 90))
+    # three well-spaced heights: the top two, as before
+    sh = {"heights": [40.0, 60.0, 80.0], "means": pd.Series({40.0: 6.0, 60.0: 6.4, 80.0: 6.7}), "alpha_top_bottom": 0.16,
+          "lo": 40.0, "hi": 80.0}
+    alpha, basis = cl.extrapolation_shear(sh)
+    assert basis == "60-80 m pair" and alpha == pytest.approx(np.log(6.7 / 6.4) / np.log(80 / 60))
+    # only close heights: said, not hidden
+    sh = {"heights": [97.0, 100.0], "means": pd.Series({97.0: 7.0, 100.0: 7.03}), "alpha_top_bottom": 0.14, "lo": 97.0, "hi": 100.0}
+    assert cl.extrapolation_shear(sh) == (0.14, "97-100 m pair, heights close together")
+    assert cl.extrapolation_shear({}) == (None, "one measurement height: no shear measured")
+
+
+def test_a_profile_that_is_not_a_clean_power_law_is_flagged():
+    # seen on two real masts: a top pair far steeper than any normal profile on one; on the other a top pair far
+    # from the fit over all heights, with the lowest cup reading more than the two above it
+    an, tq = fake_analysis()
+    ws80 = an["heights"][80.0]["ws"]
+    for name, factors, words in (("clean", {60.0: 0.950, 45.0: 0.900, 30.0: 0.840}, []),
+                                 ("steep top", {60.0: 0.89, 45.0: 0.88, 30.0: 0.87}, ["outside the usual range", "far from the"]),
+                                 ("crooked", {60.0: 0.94, 45.0: 0.925, 30.0: 0.95}, ["far from the"])):
+        hs = {80.0: an["heights"][80.0]}
+        for h, fac in factors.items():
+            hs[h] = {"ws": ws80 * fac, "sd": an["heights"][80.0]["sd"], "wd": an["heights"][80.0]["wd"]}
+        heights = sorted(hs)
+        means = pd.Series({h: float(hs[h]["ws"].mean()) for h in heights})
+        fit = float(np.polyfit(np.log(heights), np.log(means.to_numpy()), 1)[0])
+        c = cl.from_analysis({**an, "heights": hs, "shear": {"heights": heights, "means": means, "alpha_fit": fit,
+                                                             "alpha_top_bottom": 0.1, "lo": 30.0, "hi": 80.0}}, tq)
+        w = c["shear"]["warning"]
+        assert all(x in w for x in words) and (bool(w) == bool(words)), (name, w)
+        assert not words or w.count("Check the sensor heights") == 1
+
+
+def seasonal_analysis(start, end, seed=5):
+    """A record with a strong season: windy in January, calm in July."""
+    rng = np.random.default_rng(seed)
+    t = pd.date_range(start, end, freq="10min")
+    season = 1.0 + 0.35 * np.cos(2 * np.pi * (t.month - 1) / 12)
+    ws80 = pd.Series(7.0 * season * rng.weibull(2.2, len(t)) / 0.8856, index=t)
+    wd = pd.Series(rng.uniform(60, 120, len(t)), index=t)
+    sd = ws80 * 0.12
+    hs = {80.0: {"ws": ws80, "sd": sd, "wd": wd}, 60.0: {"ws": ws80 * (60 / 80) ** 0.2, "sd": sd, "wd": wd}}
+    an = {"heights": hs, "top_height": 80.0, "shear": {"alpha_top_bottom": 0.2, "lo": 60.0, "hi": 80.0},
+          "density": {"mean": 1.05, "sensor_height": 10.0}}
+    return an, {"interval_s": 600, "expected": len(t), "start": t[0], "end": t[-1]}
+
+
+def test_the_climate_is_set_to_the_annual_mean_not_to_the_plain_mean_of_the_records():
+    # 14 months, June and July twice: the records lean towards the calm season (seen on a real mast, where the
+    # wind map stood well below the long-term mean the same project had just worked out)
+    c = cl.from_analysis(*seasonal_analysis("2018-06-01", "2019-07-31 23:50"))
+    assert c["calendar_months"] == 12 and c["momm_ws"] > 1.03 * c["mean_ws"]
+    s = cl.speed_scale(c)
+    assert s["mean_ws"] == pytest.approx(c["momm_ws"]) and s["scale"] == pytest.approx(c["momm_ws"] / s["records_mean_ws"])
+    assert s["records_mean_ws"] == pytest.approx(c["mean_ws"], rel=0.01) and "some months hold more records than others" in s["lean"]
+    _, f, A, k = cl.at_height(c, 80.0, factor=s["scale"])
+    assert cl.mean_speed(f, A, k) == pytest.approx(c["momm_ws"])
+    # with a long-term correction the climate stands on the long-term mean itself
+    lt = {"long_term": 7.40, "measured": 7.10, "factor": 7.40 / 7.10}
+    s2 = cl.speed_scale(c, lt)
+    _, f, A, k = cl.at_height(c, 80.0, factor=s2["scale"])
+    assert cl.mean_speed(f, A, k) == pytest.approx(7.40) and "long-term mean 7.40 m/s at 80 m" in s2["basis"]
+    assert cl.mean_speed(*cl.at_height(c, 120.0, alpha=0.2, factor=s2["scale"])[1:]) == pytest.approx(7.40 * 1.5 ** 0.2)
+
+
+def test_an_even_record_needs_no_seasonal_scaling_and_a_part_year_is_taken_as_it_is():
+    year = cl.from_analysis(*seasonal_analysis("2019-01-01", "2019-12-31 23:50"))
+    s = cl.speed_scale(year)
+    assert abs(s["scale"] - 1.0) < 0.01 and s["lean"] == ""
+    part = cl.from_analysis(*seasonal_analysis("2019-03-01", "2019-07-31 23:50"))
+    s = cl.speed_scale(part)
+    assert s["scale"] == 1.0 and "less than a full year" in s["basis"] and part["calendar_months"] == 5

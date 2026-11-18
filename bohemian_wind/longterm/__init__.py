@@ -28,6 +28,8 @@ POWER_API = "https://power.larc.nasa.gov/api/temporal/{step}/point"
 POWER_CREDIT = "Long-term index: NASA Langley Research Center POWER Project (MERRA-2 wind speed at 50 m)."
 REF_JUMP = 0.25      # a trailing reference month whose mast-to-reference ratio is this far off is left out
 LT_YEARS = 20
+TAIL_MONTHS = 4        # how far back from the reference's last month its tail can be of a different make
+PARTIAL_SHARE = 0.40   # a month with this share of valid data may stand in for a calendar month that is otherwise missing
 
 
 class ReferenceError_(RuntimeError):
@@ -99,10 +101,16 @@ def _momm(s: pd.Series) -> float:
 
 def broken_tail(measured: pd.Series, ref: pd.Series, n_last: int = 3) -> list:
     """Trailing concurrent months whose mast-to-reference ratio breaks from the same calendar month in other years
-    (or from the rest of the series), newest first; stops at the first month that fits."""
+    (or from the rest of the series), newest first; stops at the first month that fits.
+
+    Only the reference's own latest months are looked at: that is where NASA POWER appends a different model to
+    MERRA-2. Months of an older campaign are never dropped, however much the ratio swings with the season."""
     ratio = (measured / ref.reindex(measured.index)).dropna()
     out = []
+    newest = ref.index[-1]
     for p in list(ratio.index[-n_last:])[::-1]:
+        if (newest.year - p.year) * 12 + newest.month - p.month >= TAIL_MONTHS:
+            break
         same = ratio[(ratio.index.month == p.month) & (ratio.index != p)]
         rest = ratio.drop(p)
         if not len(same) and len(rest) < 3:
@@ -146,10 +154,46 @@ def monthly_index(measured: pd.Series, ref: pd.Series, lt_years: tuple | None = 
             "monthly": [{"month": str(p), "mast": float(measured[p]), "reference": float(conc[p])} for p in measured.index]}
 
 
+def measured_months(clim: dict, ref: pd.Series) -> tuple:
+    """(monthly series for the index, partial months used). Months with at least 70 % valid data count. When that
+    leaves a calendar month uncovered, its best month with at least 40 % valid data stands in, provided this
+    completes the year: a thin February is a better guide to February than the other eleven months are. Seen on a
+    real mast, where leaving the thin month out moved the long-term mean noticeably. A campaign that stays short of
+    twelve calendar months gains nothing from a thin month at full weight, so there it is left out."""
+    series = _climate.monthly_series(clim)
+    stand_in = {}
+    for cal in sorted(set(range(1, 13)) - set(series.index.month)):
+        best = None
+        for key, v in clim["monthly"].items():
+            p = pd.Period(key, "M")
+            if p.month == cal and PARTIAL_SHARE <= v["share"] < _climate.MIN_MONTH_SHARE and p in ref.index:
+                if best is None or v["share"] > best[1]:
+                    best = (p, v["share"], v["mean"])
+        if best:
+            stand_in[cal] = best
+    if not stand_in or len(set(series.index.month) | set(stand_in)) < 12:
+        return series, []
+    used = []
+    for p, share, mean in stand_in.values():
+        series[p] = mean
+        used.append({"month": str(p), "valid_share": round(float(share), 3)})
+    return series.sort_index(), used
+
+
 def correct(clim: dict, ref: pd.Series, lt_years: tuple | None = None) -> dict:
-    """Long-term correction of a wind climate (see bohemian_wind.climate). Uses the months with at least 70 % of
-    their records valid."""
-    res = monthly_index(_climate.monthly_series(clim), ref, lt_years)
+    """Long-term correction of a wind climate (see bohemian_wind.climate)."""
+    series, partial = measured_months(clim, ref)
+    res = monthly_index(series, ref, lt_years)
+    res["partial_months_used"] = partial
+    cautions = []
+    if res["indicative"]:
+        cautions.append(f"Only {res['calendar_months']} of the 12 calendar months were measured. The factor assumes the months "
+                        "not measured behave like the ones that were. Measure a full year before relying on it.")
+    if partial:
+        cautions.append("To cover all twelve calendar months, " + ", ".join(
+            f"{pd.Period(m['month'], 'M').strftime('%B %Y')} is used with only {100 * m['valid_share']:.0f} % valid data" for m in partial)
+            + ". The factor leans on that thin month: check it before relying on the result.")
+    res["cautions"] = cautions
     res["height_m"] = clim["height_m"]
     res["credit"] = POWER_CREDIT
     return res

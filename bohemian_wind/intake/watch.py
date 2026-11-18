@@ -10,10 +10,13 @@ or a synced folder (OneDrive, Dropbox, a mail rule that saves attachments), at t
 from __future__ import annotations
 
 import json
+import re
 import threading
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
+from .. import DISCLAIMER
 from . import folder_signature
 
 STATUS_FILE = "intake/status.json"
@@ -28,6 +31,37 @@ def load_status(project) -> dict:
         except json.JSONDecodeError:
             pass
     return {"history": []}
+
+
+_MONTHS = re.compile(r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b")
+_NUMBERS = re.compile(r"\d[\d,.:]*")
+
+
+def _kind(finding: str) -> str:
+    """A finding with its numbers and dates taken out: what kind of finding it is."""
+    return _NUMBERS.sub("#", _MONTHS.sub("Mon", finding))
+
+
+def news(before: list, after: list) -> list:
+    """Findings of the latest run that are news. A finding that was there before and only moved with the record
+    count ('... in 2,390 records' becoming '... in 2,534 records', the summary line, the disclaimer) is not; a
+    second finding of a kind that was there once before is. On real daily files, every day's run otherwise
+    reported its own summary line as a new finding."""
+    was = set(before)
+    left = Counter(_kind(f) for f in before)
+    for f in after:
+        if f in was:
+            left[_kind(f)] -= 1
+    out = []
+    for f in after:
+        if f in was or f == DISCLAIMER or f.startswith("Data: "):
+            continue
+        k = _kind(f)
+        if left[k] > 0:
+            left[k] -= 1
+            continue
+        out.append(f)
+    return out
 
 
 def _hours_since(stamp: str, now: datetime) -> float | None:
@@ -57,8 +91,7 @@ def check_once(project, log=print, force: bool = False, now: datetime | None = N
             except Exception as e:  # noqa: BLE001  (the watcher must survive a bad file and say what happened)
                 status.update(state="error", message=f"The checks could not run: {e}")
             else:
-                before = set((prev or {}).get("findings") or [])
-                new_findings = [f for f in res.get("findings", []) if f not in before][:20]
+                new_findings = news((prev or {}).get("findings") or [], res.get("findings", []))[:20]
                 entry = {"at": status["last_check"], "records": res.get("records"),
                          "new_records": (res.get("records") or 0) - ((prev or {}).get("records") or 0),
                          "last_record": str(res.get("period", ["", ""])[1]), "recovery_pct": res.get("recovery_pct"),

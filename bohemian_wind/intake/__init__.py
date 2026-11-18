@@ -50,6 +50,7 @@ def detect(path) -> dict:
                 break
     counts = {"rld": 0, "sympro_txt": 0, "toa5": 0, "nomad2": 0, "rar": 0}
     nomad_files = []
+    unread = {}                                # files with a data-like name that no reader recognised, by suffix
     probed = 0
     for f in files:
         suf = f.suffix.lower()
@@ -67,8 +68,10 @@ def detect(path) -> dict:
                 elif nomad2.looks_like_nomad2(f):
                     counts["nomad2"] += 1
                     nomad_files.append(f)
+                else:
+                    unread[suf] = unread.get(suf, 0) + 1
             except Exception:  # noqa: BLE001, S112  (an unreadable file is simply not counted)
-                continue
+                unread[suf] = unread.get(suf, 0) + 1
     fmt = None
     if counts["rld"] or counts["sympro_txt"]:
         fmt = "sympro"
@@ -80,8 +83,11 @@ def detect(path) -> dict:
              f"{counts['toa5']:,} TOA5 .dat" if counts["toa5"] else "", f"{counts['nomad2']:,} Nomad2 export" if counts["nomad2"] else "",
              f"{counts['rar']:,} RAR archive" if counts["rar"] else ""]
     found = ", ".join(x for x in parts if x)
+    if not found and unread:
+        found = ("files in a format this version does not read ("
+                 + ", ".join(f"{n:,} {suf}" for suf, n in sorted(unread.items(), key=lambda kv: -kv[1])) + ")")
     return {"format": fmt, "label": FORMATS.get(fmt, "not recognised"), "counts": counts, "nomad2_files": nomad_files,
-            "found": found or "no logger files", "files": len(files)}
+            "found": found or "no data files at all", "files": len(files), "unread": unread}
 
 
 def folder_signature(path) -> str:
@@ -111,8 +117,9 @@ def _plain(text: str) -> str:
 
 
 def run_checks(path, out_root, site_name: str | None = None, settings_path=None, log=print,
-               sympro_path=None, password: str = "") -> dict:
-    """Run step 1 on a data folder. Outputs go to <out_root>/runs/<name>_<time>/. Returns summarise(run folder)."""
+               sympro_path=None, password: str = "", channels: dict | None = None) -> dict:
+    """Run step 1 on a data folder. Outputs go to <out_root>/runs/<name>_<time>/. Returns summarise(run folder).
+    channels: sensor heights and vane offsets by logger port, for formats whose files do not carry them (Nomad2)."""
     det = detect(path)
     if det["format"] is None:
         raise IntakeError(
@@ -141,6 +148,12 @@ def run_checks(path, out_root, site_name: str | None = None, settings_path=None,
         args += ["--out", str(out_root)]
         if site_name:
             args += ["--name", site_name]
+        if channels:                           # this reader takes sensor settings in the same file as the site settings
+            merged = json.loads(Path(settings_path).read_text(encoding="utf-8")) if settings_path and Path(settings_path).is_file() else {}
+            merged["channels"] = channels
+            settings_path = out_root / "runs" / "reader_settings.json"
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            settings_path.write_text(json.dumps(merged, indent=1), encoding="utf-8")
         if settings_path and Path(settings_path).is_file():
             args += ["--settings", str(settings_path)]
         if det["counts"]["rar"] and det["format"] == "toa5":
@@ -189,6 +202,7 @@ def summarise(run_dir) -> dict:
             "recovery_pct": c["recovery_pct"], "top_height_m": c["height_m"], "mean_ws": c["mean_ws"],
             "momm_ws": c.get("momm_ws"), "calendar_months": c.get("calendar_months"),
             "shear_alpha": (c.get("shear") or {}).get("alpha"), "shear_basis": (c.get("shear") or {}).get("basis"),
+            "shear_warning": (c.get("shear") or {}).get("warning") or "",
             "ti15": (c.get("ti") or {}).get("representative_15"), "ti_mean": (c.get("ti") or {}).get("mean_above_3"),
             "density": (c.get("density") or {}).get("mean"), "heights": c.get("heights") or [],
             "no_direction": c.get("no_direction", False), "format": c.get("source_format") or "",

@@ -94,6 +94,17 @@ class Grid:
             self._slope = 100.0 * np.hypot(gx, gy)
         return self._slope
 
+    def slope_at(self, x, y):
+        """Slope (per cent) of the ground at points that need not sit on a cell: differences half a cell either
+        side, read between the cells. On a cell centre this is the cell's own slope. Interpolating the cells' slopes
+        instead gives a ridge crest that runs between two cells the slope of its flanks (seen on a real ridge,
+        where it made gentle crest positions look several times steeper than they are)."""
+        h = self.res / 2.0
+        x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+        gx = (self.sample(x + h, y) - self.sample(x - h, y)) / (2 * h)
+        gy = (self.sample(x, y + h) - self.sample(x, y - h)) / (2 * h)
+        return 100.0 * np.hypot(gx, gy)
+
     def mesh(self) -> tuple:
         return np.meshgrid(self.x, self.y)
 

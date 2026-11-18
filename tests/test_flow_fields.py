@@ -95,3 +95,21 @@ def test_atlas_engine_scales_the_atlas_pattern_to_the_mast(tmp_path):
     assert np.allclose(wf125.ratio, wf.ratio, atol=1e-6)
     with pytest.raises(fields.FlowError):
         fields.wind_field(g, climate(), 100.0, "atlas", gwa_dir=tmp_path / "nothing")
+    assert wf.cautions == []                                           # a smooth atlas: nothing to warn about
+    # A mast between atlas points on a ridge (seen on a real mast, where the two readings were several per cent apart):
+    # the nearest atlas point is windier than the value interpolated to the mast, and the map says so
+    ridge = base.copy()
+    ridge[80, 80] *= 1.10                                              # the atlas point nearest to the mast below
+    folder = tmp_path / "ridge"
+    folder.mkdir()
+    for h, fac in ((100, 1.0), (150, 1.08)):
+        with rasterio.open(folder / f"XXX_wind-speed_{h}m.tif", "w", driver="GTiff", height=n, width=n, count=1,
+                           dtype="float32", crs="EPSG:4326", transform=from_origin(lon0, lat1, res, res)) as dst:
+            dst.write((ridge * fac).astype("float32"), 1)
+    near, interp = fields.atlas_at(fields.find_gwa_layers(folder), 100.0, -1.5007, 36.5008)
+    assert near == pytest.approx(ridge[80, 80], rel=1e-6) and 1.02 < near / interp < 1.05
+    g2 = tr.from_function(lambda x, y: 1500.0 + 0 * x, -1.5007, 36.5008, half_km=5, res=100)
+    wf2 = fields.wind_field(g2, climate(alpha=0.2), 100.0, "atlas", gwa_dir=folder)
+    assert len(wf2.cautions) == 1 and "nearest the mast" in wf2.cautions[0] and "higher" in wf2.cautions[0]
+    wf2.save(tmp_path / "wf.npz")
+    assert fields.WindField.load(tmp_path / "wf.npz").cautions == wf2.cautions

@@ -84,6 +84,17 @@ def test_points_sampling_and_round_trip(tmp_path):
     assert np.allclose(h.elev, g.elev, atol=1e-3) and h.lat0 == 1.5 and h.res == 100
 
 
+def test_slope_at_a_point_between_cells_is_the_ground_there_not_the_flanks():
+    # a ridge whose crest runs between two columns of cells: flat on top, 40 % down each flank
+    g = tr.from_function(lambda x, y: 2000.0 - 0.4 * np.maximum(np.abs(x - 50.0) - 50.0, 0.0), 1.5, 35.2, half_km=2, res=100)
+    assert g.slope_at(50.0, 0.0) == pytest.approx(0.0, abs=1e-9)                  # on the crest
+    r, c = g.index(0.0, 0.0)
+    assert float(g.sample(50.0, 0.0, g.slope_pct)) == pytest.approx(20.0)         # what interpolating the cells' slopes says
+    assert g.slope_at(0.0, 0.0) == pytest.approx(g.slope_pct[r, c]) == pytest.approx(20.0)   # on a cell: the cell's slope
+    assert g.slope_at(400.0, 300.0) == pytest.approx(40.0)                        # on the flank
+    assert np.allclose(g.slope_at(np.array([50.0, 400.0]), np.array([0.0, 300.0])), [0.0, 40.0])
+
+
 def test_utm_matches_reference_values():
     """Reference values from PROJ (pyproj), WGS84."""
     for lat, lon, zone, hem, e, n in ((1.5, 35.25, 36, "N", 750348.144, 165924.175),

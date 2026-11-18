@@ -31,6 +31,9 @@ S_GRID = np.arange(0.30, 2.0001, 0.002)
 DV = 0.05
 
 
+CEILING_CAUTION_PCT = 10.0   # more than this share of the P50 resting on mapped wind above the mast's is called out
+
+
 def density_factor(elev, elev_mast: float):
     """Equivalent wind-speed factor for the change of air density with elevation: power below rated goes with
     density times speed cubed, so a density ratio r acts like a speed factor r^(1/3)."""
@@ -89,9 +92,18 @@ def design(field: WindField, clim: dict, mask: np.ndarray, turbine: Turbine, n_t
     other = budget.loss_factor(losses)
     notes = list(field.notes)
 
-    def ratios_at(x, y) -> np.ndarray:           # [turbine, sector], density included
+    exact = fixed_xy is not None
+
+    def at(values, x, y) -> np.ndarray:
+        """values[row, col] at the points: read between the cells for positions that were given, on the cell for
+        positions the design put there (those sit on cell centres)."""
+        if exact:
+            return np.asarray(grid.sample(x, y, values), dtype=float)
         r, c = grid.index(x, y)
-        return (field.ratio[:, r, c] * dens[r, c][None, :]).T
+        return values[r, c]
+
+    def ratios_at(x, y) -> np.ndarray:           # [turbine, sector], density included
+        return np.stack([at(field.ratio[i], x, y) for i in range(len(centres))], axis=1) * at(dens, x, y)[:, None]
 
     def run(x, y, model=wake, ratio=None) -> tuple:
         site = wakes.site_for(ratios_at(x, y) if ratio is None else ratio, centres, f, A, k, ti)
@@ -137,8 +149,7 @@ def design(field: WindField, clim: dict, mask: np.ndarray, turbine: Turbine, n_t
             g2, n2 = run(x, y, model=m)
             checks[m] = {"wake_loss_pct": float(100 * (1 - n2.sum() / g2.sum())), "p50_gwh": float(n2.sum() * other / 1000)}
     # what the flow model adds: the same layout with the mast's own wind at every turbine (density kept)
-    r, c = grid.index(x, y)
-    mast_only = np.broadcast_to(dens[r, c][:, None], (n, len(centres)))
+    mast_only = np.broadcast_to(at(dens, x, y)[:, None], (n, len(centres)))
     g3, n3 = run(x, y, ratio=np.minimum(ratios_at(x, y), mast_only))
     ceiling = {"p50_gwh": float(n3.sum() * other / 1000), "change_pct": float(100 * (n3.sum() / net.sum() - 1))}
     # sensitivity of energy to wind speed: +1 % on every sector
@@ -152,21 +163,25 @@ def design(field: WindField, clim: dict, mask: np.ndarray, turbine: Turbine, n_t
     unc = budget.uncertainty(res["p50_gwh"], energy_per_speed, speed_uncertainty, e_terms, iav_speed)
 
     lat, lon = grid.to_latlon(x, y)
-    free_ws = field.mean_ws[r, c]
+    free_ws, ground = at(field.mean_ws, x, y), at(grid.elev, x, y)
+    slope = grid.slope_at(x, y) if exact else at(grid.slope_pct, x, y)
     positions = []
     for j in range(n):
         positions.append({
             "id": f"T{j + 1:02d}", "x": float(x[j]), "y": float(y[j]), "lat": float(lat[j]), "lon": float(lon[j]),
-            "ground_elev_m": float(grid.elev[r[j], c[j]]), "slope_pct": float(grid.slope_pct[r[j], c[j]]),
+            "ground_elev_m": float(ground[j]), "slope_pct": float(slope[j]),
             "dist_mast_km": float(np.hypot(x[j] - mast_xy[0], y[j] - mast_xy[1]) / 1000),
             "free_ws": float(free_ws[j]), "ratio_to_mast": float(free_ws[j] / field.mast_mean_ws),
             "gross_mwh": float(gross[j]), "wake_loss_pct": float(100 * (1 - net[j] / gross[j])),
             "after_wake_mwh": float(net[j]), "p50_mwh": float(net[j] * other),
             "capacity_factor": float(net[j] * other / (turbine.rated_kw / 1000.0 * wakes.HOURS))})
     hi = max(p["ratio_to_mast"] for p in positions)
-    if hi > 1.15:
-        notes.append(f"The windiest turbine position has {100 * (hi - 1):.0f} % more wind than the mast according to the "
-                     "flow model. Such speed-ups need a measurement at the position before they are relied on.")
+    cautions = []
+    if ceiling["change_pct"] < -CEILING_CAUTION_PCT:
+        cautions.append(f"{-ceiling['change_pct']:.0f} % of the P50 rests on turbine positions being windier than the mast "
+                        f"according to the wind map (the windiest by {100 * (hi - 1):.0f} %). With no position windier than "
+                        f"the mast the P50 would be {ceiling['p50_gwh']:.0f} GWh a year. Wind that was mapped, not measured, "
+                        "needs a measurement at the positions before it is relied on.")
     res.update({
         "turbine": turbine.as_dict(), "n_requested": n_requested, "n_placed": n, "capacity_mw": rated_mw,
         "positions": positions, "wake_model": wake, "wake_model_name": wakes.WAKE_MODELS[wake], "wake_checks": checks,
@@ -175,7 +190,7 @@ def design(field: WindField, clim: dict, mask: np.ndarray, turbine: Turbine, n_t
         "spacing": {"cross_d": cross_d, "along_d": along_d, "link_m": link_m,
                     "closest_pair_d": placement.min_spacing_d(x, y, turbine.rotor_m)},
         "mast_mean_ws": field.mast_mean_ws, "mean_free_ws": float(np.mean(free_ws)), "refinement": refinement,
-        "engine": field.engine, "notes": notes, "hours_per_year": wakes.HOURS})
+        "engine": field.engine, "notes": notes, "cautions": cautions, "hours_per_year": wakes.HOURS})
     return res
 
 

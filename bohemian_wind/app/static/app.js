@@ -258,9 +258,12 @@
     data() {
       return card('What to check', fText('data', 'folder', 'Folder with the logger files', { pick: 'folder', help: 'One mast per folder. NRG SymphoniePRO (.rld or .txt), Campbell TOA5 (.dat) or a Nomad2 export.' })
         + fText('name', 'name', 'Name on the report')
-        + `<details class="more"${ok(S.project.site.lat) || ok(S.project.site.elevation_m) ? ' open' : ''}><summary>Mast position and elevation</summary>
+        + `<details class="more"${ok(S.project.site.lat) || ok(S.project.site.elevation_m) || Number(S.project.data.direction_offset_deg) || ok(S.project.data.shear_alpha) ? ' open' : ''}><summary>Mast position, elevation, vane and shear</summary>
            <div class="row2">${fNum('site', 'lat', 'Latitude', { placeholder: 'from the logger' })}${fNum('site', 'lon', 'Longitude', { placeholder: 'from the logger' })}</div>
-           ${fNum('site', 'elevation_m', 'Ground elevation, m', { placeholder: 'from the logger', help: 'Fill these in only to replace what the logger files say, or when they say nothing.' })}</details>`);
+           ${fNum('site', 'elevation_m', 'Ground elevation, m', { placeholder: 'from the logger', help: 'Fill these in only to replace what the logger files say, or when they say nothing.' })}
+           <div class="row2">${fNum('data', 'direction_offset_deg', 'Vane correction, degrees', { min: -360, max: 360 })}${fNum('data', 'shear_alpha', 'Shear exponent to use', { min: -0.2, max: 0.8, placeholder: 'measured' })}</div>
+           <p class="hint">The vane correction is added to every wind direction from the wind map onwards, for a vane mounted off north. Leave the shear exponent empty to use the measured one.</p></details>`
+        + channelsEditor());
     },
     longterm() {
       const src = S.project.longterm.source;
@@ -274,7 +277,7 @@
       return card('How to map the wind', fSelect('map', 'engine', 'Method', S.app.engines.map(e => [e.key, e.name]), { rerender: true })
         + (m.engine === 'atlas' ? fText('map', 'gwa_dir', 'Folder with the Global Wind Atlas files', { pick: 'folder', help: 'GeoTIFF wind speed layers for the area, from globalwindatlas.info.' }) : '')
         + `<div class="row2">${fNum('map', 'height_m', 'Height above ground, m', { min: 10, max: 300 })}${fNum('map', 'half_km', 'Distance from the mast, km', { min: 2, max: 30, help: 'Each way.' })}</div>
-           <details class="more"><summary>Grid and roughness</summary><div class="row2">${fNum('map', 'res_m', 'Cell size, m', { min: 30, max: 500 })}${fNum('map', 'z0_m', 'Roughness length, m', { min: 0.0002, max: 2, help: '0.03 grass, 0.05 farmland, 0.3 bush.' })}</div></details>`);
+           <details class="more"><summary>Grid and roughness</summary><div class="row2">${fNum('map', 'res_m', 'Cell size, m', { min: 30, max: 500, help: '50 for narrow ridges, 100 for open ground.' })}${fNum('map', 'z0_m', 'Roughness length, m', { min: 0.0002, max: 2, help: '0.03 grass, 0.05 farmland, 0.3 bush.' })}</div></details>`);
     },
     layout() {
       const L = S.project.layout, custom = !S.app.turbines.some(t => t.key === L.turbine);
@@ -286,7 +289,8 @@
       const lossSum = 100 * (1 - L.losses.reduce((a, x) => a * (1 - x.pct / 100), 1));
       return card('Turbines', fSelect('layout', 'turbine', 'Turbine size', opts, { rerender: true, help: 'Generic turbines of each size. No manufacturer data is used.' })
           + (custom ? `<div class="row2">${fNum('layout', 'rated_kw', 'Rated power, kW', { min: 500 })}${fNum('layout', 'rotor_m', 'Rotor diameter, m', { min: 40 })}</div>` : '')
-          + `<div class="row2">${fNum('layout', 'hub_m', 'Hub height, m', { min: 40, max: 250 })}${fNum('layout', 'n_turbines', 'Number of turbines', { min: 1, max: 150, step: 1 })}</div>`)
+          + `<div class="row2">${fNum('layout', 'hub_m', 'Hub height, m', { min: 40, max: 250 })}${fNum('layout', 'n_turbines', 'Number of turbines', { min: 1, max: 150, step: 1 })}</div>`
+          + fileRow('positions', 'Turbine positions of your own', L.positions_file ? 'The layout is taken as given: the number of turbines, the spacing and the fine-tuning are not used. Remove the file to have a layout designed.' : 'Optional. One point per turbine, to work out the energy of a layout you already have.'))
         + card('Your constraints', fileRow('exclusions', 'Exclusion zones, roads and lines', 'Polygons are kept clear; lines get a buffer each side.')
           + fileRow('receptors', 'Homes and other receptors', 'One point per home. Also used for noise and shadow flicker.')
           + fileRow('boundary', 'Site boundary', 'Turbines stay inside it.')
@@ -313,6 +317,16 @@
         'A summary page to print or send']));
     },
   };
+
+  function channelsEditor() {
+    const ch = S.project.data.channels || {};
+    const rows = Object.entries(ch).map(([port, v]) => [port, v.height_m, v.direction_offset_deg]).concat([['', '', '']]);
+    return `<details class="more"${Object.keys(ch).length ? ' open' : ''}><summary>Sensor heights the files do not give</summary>
+      ${rows.map((r, i) => `<div class="row3 chrow"><div class="field"><label for="ch-p${i}">Port</label><input id="ch-p${i}" type="text" data-ch="port" value="${esc(r[0])}" placeholder="A4" autocomplete="off"></div>
+        <div class="field"><label for="ch-h${i}">Height, m</label><input id="ch-h${i}" type="number" step="any" min="0" data-ch="height" value="${ok(r[1]) ? r[1] : ''}"></div>
+        <div class="field"><label for="ch-o${i}">Vane offset, °</label><input id="ch-o${i}" type="number" step="any" data-ch="offset" value="${ok(r[2]) ? r[2] : ''}"></div></div>`).join('')}
+      <p class="hint">Only for loggers whose files carry no sensor heights (SecondWind Nomad2). The port is its name in the file, for example A4. Empty the port to take a sensor out.</p></details>`;
+  }
 
   function runCard(key, st) {
     const m = STEP[key], running = job && job.status === 'running';
@@ -344,13 +358,15 @@
           ${tile('Mean wind speed', `${num(r.mean_ws, 2)} <small>m/s</small>`, `at ${num(r.top_height_m, 0)} m, all valid records`)}
           ${tile('Valid data', `${num(r.recovery_pct, 1)} <small>%</small>`, `${num(r.records, 0)} records at the top height`)}
           ${tile('Period', `${num(r.months_usable, 0)} <small>months</small>`, `${day(r.period[0])} to ${day(r.period[1])}`)}
-          ${tile('Shear exponent', ok(r.shear_alpha) ? num(r.shear_alpha, 3) : '–', esc(r.shear_basis || ''))}
+          ${tile('Shear exponent', ok(r.shear_alpha) ? num(r.shear_alpha, 3) : '–', esc(r.shear_basis || '') + (ok(S.project.data.shear_alpha) ? `; ${num(S.project.data.shear_alpha, 2)} entered is used` : ''))}
           ${tile('Turbulence at 15 m/s', ok(r.ti15) ? num(r.ti15, 3) : '–', 'representative intensity')}
           ${tile('Air density', ok(r.density) ? `${num(r.density, 3)} <small>kg/m³</small>` : '–', 'from temperature and pressure')}
         </div>
+        ${r.shear_warning ? card(`${ICON.warn}Unusual shear`, `<p class="note">${esc(r.shear_warning)}</p>`, 'warnbox') : ''}
         ${card(`Findings <small>${findings.length}</small>`, findings.length ? list(findings, 'findings') : '<p class="note">Nothing to report.</p>')}
         <div class="maps2">
-          ${card(`Where the wind comes from <small>${num(r.top_height_m, 0)} m</small>`, r.no_direction ? '<p class="note">No direction was measured.</p>' : roseChart(r.rose)
+          ${card(`Where the wind comes from <small>${num(r.top_height_m, 0)} m, as logged</small>`, r.no_direction ? '<p class="note">No direction was measured.</p>' : roseChart(r.rose)
+            + (Number(S.project.data.direction_offset_deg) ? `<p class="hint">The wind map and the layout turn these directions by ${num(S.project.data.direction_offset_deg, 0)}° (the vane correction).</p>` : '')
             + `<details class="more"><summary>Show the numbers</summary>${table(['From', 'Share of time, %', 'Mean, m/s'], r.rose.map(s => [`${Math.round(s.centre)}° ${compass(s.centre)}`, num(100 * s.freq, 1), num(s.mean, 2)]), [1, 2])}</details>`)}
           ${card('By height', table(['Height, m', 'Mean, m/s', 'Mean of monthly means, m/s', 'Valid, %', 'Weibull A', 'k'],
             r.heights.map(h => [num(h.height_m, 0), num(h.mean_ws, 2), num(h.momm_ws, 2), num(h.recovery_pct, 1), num(h.weibull_A, 2), num(h.weibull_k, 2)]), [0, 1, 2, 3, 4, 5])
@@ -369,7 +385,7 @@
           ${tile('Monthly correlation', `r = ${num(r.r, 2)}`, 'mast against reference')}
           ${tile('Reference years', `${r.lt_years[0]} to ${r.lt_years[1]}`, 'the long-term period')}
         </div>
-        ${r.indicative ? card(`${ICON.warn}Indicative only`, `<p class="note">Only ${r.calendar_months} of the 12 calendar months were measured. The factor assumes the months not measured behave like the ones that were. Measure a full year before relying on it.</p>`, 'warnbox') : ''}
+        ${(r.cautions || []).length ? card(`${ICON.warn}${r.indicative ? 'Indicative only' : 'Check before relying on this'}`, list(r.cautions), 'warnbox') : ''}
         ${card('Mast and reference, month by month', lineChart(rows, [{ name: `Mast, ${num(r.height_m, 0)} m`, colour: 'var(--series-1)' }, { name: 'Reference, 50 m', colour: 'var(--series-2)' }], 'Monthly mean wind speed, m/s')
           + `<details class="more"><summary>Show the numbers</summary>${table(['Month', 'Mast, m/s', 'Reference, m/s'], r.monthly.map(m => [monthName(m.month), num(m.mast, 2), num(m.reference, 2)]), [1, 2])}</details>`)}
         ${card('How the factor was made', list([`Method: ${r.method}.`, `Reference over the measured months ${num(r.reference_concurrent, 2)} m/s; over ${r.lt_years[0]} to ${r.lt_years[1]} ${num(r.reference_long_term, 2)} m/s.`,
@@ -383,6 +399,7 @@
           ${tile('Terrain', `${num(r.elev_min, 0)} to ${num(r.elev_max, 0)} <small>m</small>`, `mast at ${num(r.mast_elev, 0)} m`)}
           ${tile('Steep ground', `${num(r.steep_share_pct, 1)} <small>%</small>`, 'of the area above 30 % slope')}
         </div>
+        ${(r.warnings || []).length ? card(`${ICON.warn}Check before relying on this`, list(r.warnings), 'warnbox') : ''}
         <a href="${fileUrl(r.map, st.result.at)}" target="_blank" rel="noopener"><img class="map" src="${fileUrl(r.map, st.result.at)}" alt="Map of mean wind speed around the mast"></a>
         ${card('What the map rests on', list(r.notes) + (r.credits.length ? `<p class="hint">${r.credits.map(esc).join(' ')}</p>` : ''))}
         ${card('', `<div class="links"><a class="btn" href="${fileUrl(r.map_print)}" target="_blank" rel="noopener">Open the print version</a></div>`)}`;
@@ -402,6 +419,7 @@
           ${tile('Gross energy', `${num(r.gross_gwh, 0)} <small>GWh a year</small>`, 'before wakes and losses')}
           ${tile('Wind at the turbines', `${num(r.mean_free_ws, 2)} <small>m/s</small>`, `mean at ${num(t.hub_m, 0)} m; mast ${num(r.mast_mean_ws, 2)} m/s`)}
         </div>
+        ${(r.warnings || []).length ? card(`${ICON.warn}Check before relying on this`, list(r.warnings), 'warnbox') : ''}
         ${short ? card(`${ICON.warn}Fewer turbines than asked for`, `<p class="note">${r.n_placed} of ${r.n_requested} fit in the buildable area with this spacing. Loosen a buffer, widen the search, or ask for fewer.</p>`, 'warnbox') : ''}
         <a href="${fileUrl(r.map, st.result.at)}" target="_blank" rel="noopener"><img class="map" src="${fileUrl(r.map, st.result.at)}" alt="Map of the turbine layout over the wind map, with the buildable area"></a>
         ${card(`Buildable area <small>${num(r.constraints.buildable_km2, 1)} km² left</small>`, table(['Rule', 'Removed, km²', 'Left, km²'], r.constraints.steps.map(s => [esc(s.rule), num(s.removed_km2, 2), num(s.left_km2, 2)]), [1, 2]))}
@@ -576,6 +594,16 @@
         finally { render(true); }
         if ($('#watch-on') && $('#watch-on').checked) toast('Daily intake is on: the folder is being watched.');
       });
+      return;
+    }
+    if (el.dataset.ch) {
+      const channels = {};
+      main.querySelectorAll('.chrow').forEach(row => {
+        const port = row.querySelector('[data-ch="port"]').value.trim().toUpperCase();
+        const h = row.querySelector('[data-ch="height"]').value, o = row.querySelector('[data-ch="offset"]').value;
+        if (port && (h !== '' || o !== '')) channels[port] = { height_m: h === '' ? null : Number(h), direction_offset_deg: o === '' ? null : Number(o) };
+      });
+      act(async () => { S = await api('/api/settings', { section: 'data', values: { channels } }); render(true); });
       return;
     }
     if (el.dataset.loss !== undefined) {

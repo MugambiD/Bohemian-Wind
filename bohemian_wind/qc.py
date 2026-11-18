@@ -24,8 +24,8 @@ RANGES = {
 }
 PRESSURE_BAND_HPA = 60.0  # with a site elevation: standard-atmosphere pressure ± this
 # v0.1.4: the range check also covers the other statistics of a record, not the average alone. A logger glitch can
-# leave a believable 10-minute average next to a gust of 1,500 m/s and a standard deviation of 60 m/s (seen on two third-party masts,
-# 2012-13); the average of such a record is contaminated, so the whole record is flagged 'range'.
+# leave a believable 10-minute average next to a gust and a standard deviation that no wind can have (seen on real
+# masts); the average of such a record is contaminated, so the whole record is flagged 'range'.
 GUST_MAX_MS = 90.0  # highest believable Max / Gust of a cup: above the 70 m/s extreme gust of IEC class I
 SD_MAX = {"wind_speed": 15.0, "wind_direction": 105.0}  # 10-minute SD; a vane's SD cannot pass about 104 deg
 STAT_RANGE_KINDS = ("wind_speed", "temperature", "pressure", "humidity")  # Min / Max / Gust checked against the range

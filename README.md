@@ -38,7 +38,7 @@ Honest status of this version (0.2.0-dev). "Working" means it runs end to end an
 | Long-term correction | **Working, one method:** a monthly index against NASA POWER (MERRA-2 at 50 m). No second reference, no hourly method yet. |
 | Wind resource maps | **Working, two methods:** the own flow model over SRTM terrain, or the Global Wind Atlas pattern scaled to the mast. |
 | Own flow model | **First version.** Terrain speed-up from linear theory (Jackson and Hunt). Tested against theory only, not yet against measured hills or a second mast. Not for steep terrain. |
-| Turbine layout with constraints | **Working.** Best cells first with a spacing rule, then wake-aware fine-tuning. It is not a global optimiser. |
+| Turbine layout with constraints | **Working.** Best cells first with a spacing rule, then wake-aware fine-tuning. It is not a global optimiser. A layout of your own (one point per turbine) can be given instead and is taken as it is. |
 | Wake effects and energy yield | **Working,** through [PyWake](https://topfarm.pages.windenergy.dtu.dk/PyWake/) (DTU). Generic turbines by size; no manufacturer curves. |
 | Losses and P50/P90 | **Working with default assumptions** that you can edit. The uncertainty budget is a developer's, not an assessor's. |
 | Shadow flicker and noise | **Working at screening level:** astronomical worst-case flicker; noise after ISO 9613-2 at one frequency. |
@@ -97,7 +97,7 @@ How each step works, with its limits: [docs/workflow.md](docs/workflow.md). Desi
 - **Planted faults.** The demo mast and a synthetic SymphoniePRO mast carry gaps, dead cups, stuck vanes, spikes and out-of-range gusts; every one must be found.
 - **The whole chain.** The demo project runs through all six steps in the tests, and every turbine must respect every constraint.
 - **The interface.** The programming interface is tested for its locks: no token, another site's name or a path outside the project are refused.
-- **Real masts, privately.** A private corpus of real masts is re-run on Bohemian's own computers after changes to step 1. Steps 2 to 6 as packaged here have so far been run on the invented demo only.
+- **Real masts, privately.** A private corpus of real masts is re-run on Bohemian's own computers after changes: step 1 against accepted results value by value, steps 2 to 6 against earlier independent calculations where they exist. The data and the results stay there. What those runs break is fixed here with a test built from invented data.
 
 ## Your data stays yours
 

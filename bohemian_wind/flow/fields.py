@@ -28,6 +28,8 @@ from . import linear
 
 ENGINES = ("linear", "atlas")
 RATIO_LIMITS = (0.4, 1.8)        # ratios outside this are not believable from either engine; they are clipped and counted
+VERSION = 2                  # of what a stored wind field holds: raise it and stored fields are worked out again
+MAST_SPREAD_LIMIT = 0.02     # atlas at its nearest grid point against interpolated to the mast: more apart is said
 STEEP_LIMIT_PCT = 30.0           # slope above which linear theory over-predicts (17 degrees)
 GWA_CREDIT = ("Wind atlas: data obtained from the Global Wind Atlas 4.0, a free, web-based application developed, owned "
               "and operated by the Technical University of Denmark (DTU). The Global Wind Atlas 4.0 is released in "
@@ -53,6 +55,7 @@ class WindField:
     notes: list = field(default_factory=list)
     steep_share: float = 0.0      # share of cells steeper than 30 %
     clipped_share: float = 0.0
+    cautions: list = field(default_factory=list)      # what to check before relying on the field
 
     def ratio_at(self, x, y) -> np.ndarray:
         """[sector, point] ratios at points (nearest cell)."""
@@ -65,7 +68,7 @@ class WindField:
                             height_m=self.height_m, centres=self.centres, ratio=self.ratio.astype("float32"),
                             mean_ws=self.mean_ws.astype("float32"), mast_mean_ws=self.mast_mean_ws, engine=self.engine,
                             notes=np.array(self.notes, dtype=str), steep_share=self.steep_share,
-                            clipped_share=self.clipped_share)
+                            clipped_share=self.clipped_share, cautions=np.array(self.cautions, dtype=str))
 
     @classmethod
     def load(cls, path) -> "WindField":
@@ -75,7 +78,8 @@ class WindField:
         return cls(grid=g, height_m=float(d["height_m"]), centres=d["centres"], ratio=d["ratio"].astype(float),
                    mean_ws=d["mean_ws"].astype(float), mast_mean_ws=float(d["mast_mean_ws"]), engine=str(d["engine"]),
                    notes=[str(n) for n in d["notes"]], steep_share=float(d["steep_share"]),
-                   clipped_share=float(d["clipped_share"]))
+                   clipped_share=float(d["clipped_share"]),
+                   cautions=[str(n) for n in d["cautions"]] if "cautions" in d.files else [])
 
 
 def linear_ratios(grid: Grid, centres, height_m: float, z0_m: float, mast_xy=(0.0, 0.0)) -> np.ndarray:
@@ -124,6 +128,39 @@ def _gwa_layer(path, lat, lon) -> np.ndarray:
     return data[row, col]
 
 
+def _gwa_point(path, lat: float, lon: float) -> tuple:
+    """(atlas value at its grid point nearest the position, value interpolated between the four points round it)."""
+    import rasterio  # noqa: PLC0415
+    from rasterio.windows import Window  # noqa: PLC0415
+    with rasterio.open(path) as src:
+        fc = (lon - src.transform.c) / src.transform.a - 0.5
+        fr = (lat - src.transform.f) / src.transform.e - 0.5
+        c0, r0 = int(math.floor(fc)), int(math.floor(fr))
+        q = src.read(1, window=Window(c0, r0, 2, 2), boundless=True, fill_value=np.nan).astype(float)
+        nodata = src.nodata
+    if nodata is not None:
+        q[q == nodata] = np.nan
+    q[q <= 0] = np.nan
+    tx, ty = fc - c0, fr - r0
+    w = np.array([[(1 - tx) * (1 - ty), tx * (1 - ty)], [(1 - tx) * ty, tx * ty]])
+    ok = np.isfinite(q)
+    interp = float((q[ok] * w[ok]).sum() / w[ok].sum()) if ok.any() else float("nan")
+    return float(q[1 if ty >= 0.5 else 0, 1 if tx >= 0.5 else 0]), interp
+
+
+def atlas_at(layers: dict, height_m: float, lat: float, lon: float) -> tuple:
+    """(nearest, interpolated) atlas wind speed at a position and height: see _gwa_point. On a ridge the two can
+    differ by several per cent, and the whole pattern is tied to whichever is taken at the mast."""
+    hs = sorted(layers)
+    lo = max([h for h in hs if h <= height_m], default=hs[0])
+    hi = min([h for h in hs if h >= height_m], default=hs[-1])
+    a = np.array(_gwa_point(layers[lo], lat, lon))
+    if lo != hi:
+        b = np.array(_gwa_point(layers[hi], lat, lon))
+        a = a * (height_m / lo) ** (np.log(b / a) / math.log(hi / lo))
+    return float(a[0]), float(a[1])
+
+
 def atlas_ratio(grid: Grid, layers: dict, height_m: float, mast_xy=(0.0, 0.0)) -> np.ndarray:
     """[row, col] ratio of the atlas at each cell to the atlas at the mast, at height_m (power law between the two
     atlas layers that bracket the height, as the atlas itself is layered)."""
@@ -149,7 +186,8 @@ def atlas_ratio(grid: Grid, layers: dict, height_m: float, mast_xy=(0.0, 0.0)) -
 def wind_field(grid: Grid, clim: dict, height_m: float, engine: str = "linear", z0_m: float = 0.05,
                lt_factor: float = 1.0, alpha: float | None = None, gwa_dir=None, mast_xy=(0.0, 0.0),
                keep_half_m: float | None = None, rotate_deg: float = 0.0) -> WindField:
-    """Wind at every cell of the grid at height_m, from the mast's wind climate.
+    """Wind at every cell of the grid at height_m, from the mast's wind climate. lt_factor multiplies the climate's
+    speeds (climate.speed_scale: the long-term mean, or the seasonally balanced measured mean).
 
     keep_half_m: the result is cropped to this half-width. Run the engine on a grid about a quarter wider than
     the area wanted: the linear model fades the terrain out near the edges of its domain."""
@@ -158,7 +196,7 @@ def wind_field(grid: Grid, clim: dict, height_m: float, engine: str = "linear", 
     centres, f, A, k = _climate.at_height(clim, height_m, alpha=alpha, factor=lt_factor)
     if rotate_deg:
         centres = (centres + rotate_deg) % 360.0
-    notes = []
+    notes, cautions = [], []
     if engine == "linear":
         ratio = linear_ratios(grid, centres, height_m, z0_m, mast_xy)
         notes.append(f"Bohemian linear flow model v{linear.__version__}: terrain only, roughness length {z0_m:g} m "
@@ -171,6 +209,14 @@ def wind_field(grid: Grid, clim: dict, height_m: float, engine: str = "linear", 
         notes.append("Global Wind Atlas pattern scaled to the mast: the same ratio for every wind direction. "
                      "It is not a flow model; far from the mast and in complex terrain it is only as good as the atlas.")
         notes.append(GWA_CREDIT)
+        near, interp = atlas_at(layers, height_m, *[float(v) for v in grid.to_latlon(*mast_xy)])
+        if np.isfinite(near) and np.isfinite(interp) and abs(near / interp - 1.0) > MAST_SPREAD_LIMIT:
+            d = 100.0 * abs(near / interp - 1.0)
+            cautions.append(
+                f"The atlas has {near:.2f} m/s at its grid point nearest the mast and {interp:.2f} m/s interpolated to "
+                f"the mast's position, {d:.0f} % apart: its points are about 250 m apart and the mast stands between "
+                f"them. The pattern is tied to the nearest point. Tied to the interpolated value, every wind speed away "
+                f"from the mast would be about {d:.0f} % {'higher' if near > interp else 'lower'}.")
     clipped = (ratio < RATIO_LIMITS[0]) | (ratio > RATIO_LIMITS[1])
     clipped_share = float(clipped.mean())
     ratio = np.clip(ratio, *RATIO_LIMITS)
@@ -179,8 +225,10 @@ def wind_field(grid: Grid, clim: dict, height_m: float, engine: str = "linear", 
         grid, ratio = grid.crop(keep_half_m), ratio[:, ry, rx]
     steep = float((grid.slope_pct > STEEP_LIMIT_PCT).mean())
     if steep > 0.02:
-        notes.append(f"{100 * steep:.0f} % of the area is steeper than {STEEP_LIMIT_PCT:.0f} % (17 degrees). Linear flow "
-                     "models over-predict speed-ups on steep ground: treat the windiest cells with care.")
+        notes.append(f"{100 * steep:.0f} % of the area is steeper than {STEEP_LIMIT_PCT:.0f} % (17 degrees). "
+                     + ("Linear flow models over-predict speed-ups on steep ground" if engine == "linear" else
+                        "Neither the atlas nor a linear flow model resolves the wind on ground this steep")
+                     + ": treat the windiest cells with care.")
     if clipped_share > 0.001:
         notes.append(f"{100 * clipped_share:.1f} % of the ratios fell outside {RATIO_LIMITS[0]:g}-{RATIO_LIMITS[1]:g} "
                      "and were limited to that range.")
@@ -188,4 +236,4 @@ def wind_field(grid: Grid, clim: dict, height_m: float, engine: str = "linear", 
     mean_ws = np.tensordot(sector_means, ratio, axes=(0, 0))
     return WindField(grid=grid, height_m=float(height_m), centres=centres, ratio=ratio, mean_ws=mean_ws,
                      mast_mean_ws=float(sector_means.sum()), engine=engine, notes=notes, steep_share=steep,
-                     clipped_share=clipped_share)
+                     clipped_share=clipped_share, cautions=cautions)

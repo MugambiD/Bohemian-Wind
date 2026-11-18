@@ -37,6 +37,7 @@ NEEDS = {"data": (), "longterm": ("data",), "map": ("data",), "layout": ("map",)
 ESTIMATE_NOTE = ("Developer estimate prepared by Bohemian Renewables with open-source tools. It is not an accredited or "
                  "bankable energy yield assessment and must not be used for financing decisions.")
 DEFAULT_ALPHA = 0.14
+MAX_CELLS = 1.6e6        # terrain cells in one wind map (25 km each way in 50 m cells): beyond it the flow model's memory runs to gigabytes
 
 
 class ProjectError(RuntimeError):
@@ -48,12 +49,21 @@ def defaults() -> dict:
     return {
         "name": "", "created": f"{datetime.now():%Y-%m-%d %H:%M}", "demo": False, "version": __version__,
         "site": {"lat": None, "lon": None, "elevation_m": None},
-        "data": {"folder": "", "watch": False, "watch_minutes": 60, "stale_hours": 36},
+        "data": {"folder": "", "watch": False, "watch_minutes": 60, "stale_hours": 36,
+                 # a vane mounted off north: degrees added to every direction from the wind map onwards
+                 "direction_offset_deg": 0.0,
+                 # shear exponent to use instead of the measured one (empty = measured)
+                 "shear_alpha": None,
+                 # for loggers whose files carry no sensor heights (Nomad2): {"A4": {"height_m": 78, "direction_offset_deg": -28}}
+                 "channels": {}},
         "longterm": {"source": "power", "monthly_file": "", "daily_file": ""},
-        "map": {"engine": "linear", "height_m": 120.0, "half_km": 8.0, "res_m": 100.0, "z0_m": 0.05, "gwa_dir": ""},
+        # 50 m cells: on a real ridge the crests were narrower than 100 m cells, and a layout lost several per cent of its energy
+        "map": {"engine": "linear", "height_m": 120.0, "half_km": 8.0, "res_m": 50.0, "z0_m": 0.05, "gwa_dir": ""},
         "layout": {"turbine": "4.5 MW, 163 m rotor", "rated_kw": 4500.0, "rotor_m": 163.0, "hub_m": 120.0,
                    "n_turbines": 10, "cross_d": 3.0, "along_d": 7.0, "link_m": 2500.0, "wake": "niayifar", "refine": True,
                    "exclusions_file": "", "receptors_file": "", "boundary_file": "",
+                   # turbine positions of the user's own (one point per turbine): the layout is taken as given
+                   "positions_file": "",
                    "rules": {"radius_km": 8.0, "slope_max_pct": 15.0, "exclusion_buffer_m": 100.0, "line_buffer_m": 250.0,
                              "receptor_setback_m": 500.0, "min_mean_ws": None, "elevation_max_m": None},
                    "losses": budget.losses_table()},
@@ -83,6 +93,27 @@ def _num(v, name: str, lo: float | None = None, hi: float | None = None, allow_n
         raise ProjectError(f"{name} must be between {lo:g} and {hi:g}." if lo is not None and hi is not None
                            else f"{name} is out of range.")
     return f
+
+
+def _channels(raw) -> dict:
+    """Sensor settings by logger port, as the Nomad2 reader takes them."""
+    if not isinstance(raw, dict):
+        raise ProjectError("Sensor settings must be given by port, for example A4.")
+    out = {}
+    for port, v in raw.items():
+        port = str(port).strip().upper()
+        if not port or not isinstance(v, dict):
+            continue
+        row = {}
+        h = _num(v.get("height_m"), f"Height of {port}", 0, 300, True)
+        off = _num(v.get("direction_offset_deg"), f"Vane offset of {port}", -360, 360, True)
+        if h is not None:
+            row["height_m"] = h
+        if off:
+            row["direction_offset_deg"] = off
+        if row:
+            out[port] = row
+    return out
 
 
 class Project:
@@ -132,20 +163,32 @@ class Project:
     def rel(self, p) -> str:
         return Path(p).resolve().relative_to(self.folder.resolve()).as_posix()
 
+    def resolve(self, path) -> Path | None:
+        """A path from the settings: as it is when absolute, otherwise from the project folder."""
+        if not path:
+            return None
+        p = Path(str(path))
+        return p if p.is_absolute() else self.folder / p
+
     # ---------- settings ----------
 
     def update(self, section: str, values: dict) -> None:
         if section == "name":
             self.s["name"] = str(values.get("name") or self.s["name"]).strip()
         elif section in ("site", "data", "longterm", "map", "layout", "environment"):
+            values = dict(values)
+            channels = values.pop("channels", None) if section == "data" else None
             self.s[section] = _merge(self.s[section], values)
+            if channels is not None:            # replaced as a whole, so a sensor can be taken out again
+                self.s["data"]["channels"] = _channels(channels)
         else:
             raise ProjectError(f"Unknown settings section '{section}'.")
         self.save()
 
     def attach(self, kind: str, source) -> str:
-        """Copy a constraints file (exclusions, receptors or boundary) into the project. Returns the stored path."""
-        if kind not in ("exclusions", "receptors", "boundary"):
+        """Copy a constraints file (exclusions, receptors or boundary) or a file of turbine positions into the
+        project. Returns the stored path."""
+        if kind not in ("exclusions", "receptors", "boundary", "positions"):
             raise ProjectError(f"Unknown file kind '{kind}'.")
         src = Path(source)
         if not src.is_file():
@@ -157,6 +200,9 @@ class Project:
             raise ProjectError(str(e)) from e
         if kind == "receptors" and not any(f.kind == "point" for f in feats):
             raise ProjectError("The homes file holds no points. Give a GeoJSON, KML or CSV file with one point per home.")
+        if kind == "positions" and not any(f.kind == "point" for f in feats):
+            raise ProjectError("The turbine positions file holds no points. Give a GeoJSON, KML or CSV file with one "
+                               "point per turbine.")
         if kind == "boundary" and not any(f.kind == "polygon" for f in feats):
             raise ProjectError("The boundary file holds no polygon.")
         dest = self.path("constraints", f"{kind}{src.suffix.lower()}")
@@ -175,7 +221,7 @@ class Project:
         summary = dict(summary)
         summary["at"] = f"{datetime.now():%Y-%m-%d %H:%M:%S}"
         summary["based_on"] = {n: (self.result(n) or {}).get("at") for n in NEEDS[step]}
-        if step == "layout":       # the long-term factor used, so a new long-term run marks the layout out of date
+        if step in ("map", "layout"):   # both rest on the long-term mean: a new long-term run marks them out of date
             summary["based_on"]["longterm"] = (self.result("longterm") or {}).get("at")
         self.s["results"][step] = summary
         self.save()
@@ -217,18 +263,41 @@ class Project:
                                "longitude under 'Mast data', then run this step again.")
         return {"lat": lat, "lon": lon, "elevation_m": elev}
 
-    def lt_factor(self) -> tuple:
+    def speed_scale(self, clim: dict | None = None) -> dict:
+        """What the wind climate's speeds are multiplied by, and why (see climate.speed_scale). A long-term
+        correction made before the mast data were last checked is not used: its mean belongs to other data."""
+        clim = clim or self.climate()
         r = self.result("longterm")
-        if r and r.get("factor"):
-            return float(r["factor"]), f"long-term factor {r['factor']:.3f} applied"
-        return 1.0, "no long-term correction applied: the measured period is taken as it is"
+        if r and self.status("longterm") == "stale":
+            raise ProjectError("The mast data were checked again after the long-term correction was made. Run step 2 "
+                               "(long-term correction) again, then this step, so both rest on the same data.")
+        return _climate.speed_scale(clim, r)
+
+    def vane_offset(self) -> tuple:
+        off = _num(self.s["data"].get("direction_offset_deg"), "Vane correction", -360, 360, True) or 0.0
+        return off, (f"wind directions turned by {off:+g} degrees (vane correction entered in the project)" if off else "")
 
     def alpha(self, clim: dict) -> tuple:
+        own = _num(self.s["data"].get("shear_alpha"), "Shear exponent", -0.2, 0.8, True)
+        if own is not None:
+            return own, f"shear exponent {own:g} entered in the project carries the wind to hub height"
         a = (clim.get("shear") or {}).get("alpha")
         if a is None:
             return DEFAULT_ALPHA, (f"no shear measured (one height): an assumed power-law exponent of {DEFAULT_ALPHA:g} "
                                    "carries the wind to hub height")
         return float(a), f"measured shear exponent {a:.3f} ({clim['shear']['basis']}) carries the wind to hub height"
+
+    def warnings(self, clim: dict) -> list:
+        """What a reader must know before trusting anything carried away from the mast."""
+        out = []
+        w = (clim.get("shear") or {}).get("warning")
+        if w and self.s["data"].get("shear_alpha") in (None, ""):
+            out.append(w)
+        if clim.get("no_direction"):
+            out.append("No wind direction was measured: every direction is given the same wind, so the wind map and the "
+                       "wake losses are rough.")
+        out += list((self.result("longterm") or {}).get("cautions") or [])      # a part-year or a thin month reaches the energy too
+        return out
 
     def turbine(self):
         from .energy.turbine import PRESETS, Turbine  # noqa: PLC0415
@@ -267,22 +336,25 @@ class Project:
         from .flow import fields  # noqa: PLC0415
         m = self.s["map"]
         clim = self.climate()
-        factor, _ = self.lt_factor()
+        factor = self.speed_scale(clim)["scale"]
         alpha, _ = self.alpha(clim)
+        offset, _ = self.vane_offset()
         key = {"height_m": float(height_m), "engine": m["engine"], "z0_m": float(m["z0_m"]), "factor": round(factor, 5),
-               "alpha": round(alpha, 5), "climate": (self.result("data") or {}).get("at"), "half_km": float(m["half_km"])}
+               "alpha": round(alpha, 5), "climate": (self.result("data") or {}).get("at"), "half_km": float(m["half_km"]),
+               "rotate_deg": offset, "gwa_dir": str(m.get("gwa_dir") or "") if m["engine"] == "atlas" else "",
+               "field_version": fields.VERSION}
         store, meta = self.folder / "maps" / f"windfield_{height_m:g}m.npz", self.folder / "maps" / f"windfield_{height_m:g}m.json"
         if store.is_file() and meta.is_file() and json.loads(meta.read_text(encoding="utf-8")) == key:
             return fields.WindField.load(store)
         grid = self.grid()
         log(f"Computing the wind field at {height_m:g} m ({'own linear flow model' if m['engine'] == 'linear' else 'atlas pattern'}) ...")
-        gwa = (m.get("gwa_dir") or None) if m["engine"] == "atlas" else None
+        gwa = self.resolve(m.get("gwa_dir")) if m["engine"] == "atlas" else None
         if m["engine"] == "atlas" and not gwa:
             raise ProjectError("The atlas engine needs the folder with the Global Wind Atlas GeoTIFF files for this area "
                                "(download them from globalwindatlas.info), or choose the own flow model.")
         try:
             wf = fields.wind_field(grid, clim, height_m, m["engine"], z0_m=float(m["z0_m"]), lt_factor=factor, alpha=alpha,
-                                   gwa_dir=gwa, keep_half_m=float(m["half_km"]) * 1000.0)
+                                   gwa_dir=gwa, keep_half_m=float(m["half_km"]) * 1000.0, rotate_deg=offset)
         except fields.FlowError as e:
             raise ProjectError(str(e)) from e
         self.path("maps", "x")
@@ -297,23 +369,23 @@ class Project:
         folder = self.s["data"].get("folder")
         if not folder:
             raise ProjectError("Choose the folder that holds the mast's logger files.")
-        src = Path(folder)
-        if not src.is_absolute():
-            src = self.folder / src
+        src = self.resolve(folder)
         if not src.exists():
             raise ProjectError(f"The data folder was not found: {src}")
         settings_path = None
         s = self.s["site"]
-        vals = {"site_name": self.s["name"]}
+        vals = {}                       # only what replaces the logger's own values; the name travels separately
         if s.get("elevation_m") is not None:
-            vals.update(elevation_m=float(s["elevation_m"]), source="entered in the project")
+            vals["elevation_m"] = float(s["elevation_m"])
         if s.get("lat") is not None and s.get("lon") is not None:
             vals.update(latitude=float(s["lat"]), longitude=float(s["lon"]))
-        if len(vals) > 1 or self.s["name"]:
+        if vals:
+            vals["source"] = "entered in the Bohemian Wind project"
             settings_path = self.path("runs", "site_settings.json")
             settings_path.write_text(json.dumps(vals, indent=1), encoding="utf-8")
         try:
-            out = intake.run_checks(src, self.folder, site_name=self.s["name"] or None, settings_path=settings_path, log=log)
+            out = intake.run_checks(src, self.folder, site_name=self.s["name"] or None, settings_path=settings_path, log=log,
+                                    channels=self.s["data"].get("channels") or None)
         except intake.IntakeError as e:
             raise ProjectError(str(e)) from e
         if not out.get("climate"):
@@ -340,12 +412,8 @@ class Project:
         clim = self.climate()
         cfg = self.s["longterm"]
         if cfg.get("source") == "file":
-            monthly = self.folder / cfg["monthly_file"] if cfg.get("monthly_file") and not Path(cfg["monthly_file"]).is_absolute() \
-                else Path(cfg.get("monthly_file") or "")
-            daily = None
-            if cfg.get("daily_file"):
-                daily = Path(cfg["daily_file"]) if Path(cfg["daily_file"]).is_absolute() else self.folder / cfg["daily_file"]
-            if not monthly.is_file():
+            monthly, daily = self.resolve(cfg.get("monthly_file")), self.resolve(cfg.get("daily_file"))
+            if monthly is None or not monthly.is_file():
                 raise ProjectError("Choose the NASA POWER monthly file (JSON, wind speed at 50 m), or switch to 'Download'.")
             files = {"monthly": str(monthly), "daily": str(daily) if daily else None}
             log(f"Reference data from {monthly.name}.")
@@ -366,8 +434,8 @@ class Project:
         self.path("longterm", "longterm.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
         log(f"Long-term factor {res['factor']:.3f}: {res['measured']:.2f} m/s measured becomes {res['long_term']:.2f} m/s "
             f"at {clim['height_m']:g} m (monthly correlation r = {res['r']:.2f}, {res['months']} months).")
-        if res["indicative"]:
-            log("  Fewer than 12 calendar months measured: the factor is indicative only.")
+        for c in res["cautions"]:
+            log("  " + c)
         return self._store("longterm", res)
 
     # ---------- step 3: terrain and wind map ----------
@@ -379,6 +447,11 @@ class Project:
         height = _num(m.get("height_m"), "Map height", 10, 300)
         half = _num(m.get("half_km"), "Area half-width", 2, 30)
         res_m = _num(m.get("res_m"), "Grid cell size", 30, 500)
+        cells = (2 * half * 1.25 * 1000.0 / res_m) ** 2
+        if cells > MAX_CELLS:
+            fit = int(np.ceil(2 * half * 1.25 * 1000.0 / np.sqrt(MAX_CELLS) / 10.0) * 10)
+            raise ProjectError(f"{half:g} km each way in {res_m:g} m cells is {cells / 1e6:.1f} million cells, more than this "
+                               f"computer should be asked to hold. Use cells of {fit} m or more, or map a smaller area.")
         _num(m.get("z0_m"), "Roughness length", 0.0002, 2.0)
         clim = self.climate()
         site = self.site()
@@ -407,9 +480,10 @@ class Project:
             log(f"Terrain grid: {grid.shape[1]} x {grid.shape[0]} cells of {grid.res:g} m, "
                 f"{float(np.nanmin(grid.elev)):.0f} to {float(np.nanmax(grid.elev)):.0f} m.")
         wf = self.wind_field(height, log)
-        factor, f_note = self.lt_factor()
+        scale = self.speed_scale(clim)
+        f_note = scale["basis"]
         _, a_note = self.alpha(clim)
-        sub = f"{self.s['name']}: {'own linear flow model' if wf.engine == 'linear' else 'Global Wind Atlas pattern scaled to the mast'}; {f_note}"
+        sub = f"{self.s['name']}: {'own linear flow model' if wf.engine == 'linear' else 'Global Wind Atlas pattern scaled to the mast'}; {scale['short']}"
         dark = maps.wind_map(wf.grid, wf.mean_ws, self.path("maps", "wind_map.png"), height_m=height, theme="dark",
                              title=f"Mean wind speed at {height:g} m", subtitle=sub)
         light = maps.wind_map(wf.grid, wf.mean_ws, self.path("maps", "wind_map_print.png"), height_m=height, theme="light",
@@ -422,8 +496,12 @@ class Project:
                "p95_ws": float(np.nanpercentile(wf.mean_ws, 95)), "steep_share_pct": 100.0 * wf.steep_share,
                "area_km2": float(wf.grid.shape[0] * wf.grid.shape[1] * wf.grid.res ** 2 / 1e6), "cell_m": wf.grid.res,
                "elev_min": float(np.nanmin(wf.grid.elev)), "elev_max": float(np.nanmax(wf.grid.elev)),
-               "mast_elev": float(wf.grid.sample(0.0, 0.0)), "notes": wf.notes + [f_note.capitalize() + ".", a_note.capitalize() + "."],
-               "credits": credits, "lt_factor": factor}
+               "mast_elev": float(wf.grid.sample(0.0, 0.0)),
+               "notes": wf.notes + [n[0].upper() + n[1:] + "." for n in (f_note, a_note, self.vane_offset()[1]) if n]
+               + ([scale["lean"]] if scale["lean"] else []),
+               "credits": credits, "lt_factor": float((self.result("longterm") or {}).get("factor") or 1.0),
+               "annual_mean_ws": scale["mean_ws"], "annual_mean_height_m": clim["height_m"],
+               "climate_scale": scale["scale"], "warnings": self.warnings(clim) + list(wf.cautions)}
         log(f"Wind map at {height:g} m: {out['min_ws']:.1f} to {out['max_ws']:.1f} m/s; {wf.mast_mean_ws:.2f} m/s at the mast.")
         return self._store("map", out)
 
@@ -459,10 +537,22 @@ class Project:
         elev = site.get("elevation_m") if site.get("elevation_m") is not None else float(grid.sample(0.0, 0.0))
         d = clim.get("density") or {}
         rho, rho_src = air_density(elev, turbine.hub_m, d.get("mean"), d.get("sensor_height_m"))
-        factor, f_note = self.lt_factor()
+        scale = self.speed_scale(clim)
+        f_note = scale["basis"]
         alpha, a_note = self.alpha(clim)
+        given = constraints.points_of(self.features("positions"), grid, prefix="T")
+        fixed = None
+        if given:
+            out = [g["name"] for g in given if not grid.inside(g["x"], g["y"])]
+            if out:
+                raise ProjectError(f"{len(out)} of the {len(given)} turbine positions given {'lies' if len(out) == 1 else 'lie'} outside the mapped area "
+                                   f"({', '.join(out[:5])}{' and others' if len(out) > 5 else ''}). Widen the wind map "
+                                   "(step 3) or correct the positions file.")
+            fixed = (np.array([g["x"] for g in given]), np.array([g["y"] for g in given]))
+            n = len(given)
+            log(f"Using the {n} turbine positions given in {self.s['layout']['positions_file']}: the layout is taken as it is.")
         try:
-            res = assess.design(wf, clim, mask, turbine, n, lt_factor=factor, alpha=alpha, rho_hub=rho,
+            res = assess.design(wf, clim, mask, turbine, n, lt_factor=scale["scale"], alpha=alpha, rho_hub=rho, fixed_xy=fixed,
                                 cross_d=_num(L.get("cross_d"), "Spacing across the wind", 1.5, 15),
                                 along_d=_num(L.get("along_d"), "Spacing along the wind", 1.5, 20),
                                 link_m=_num(L.get("link_m"), "Link distance", 0, 20000, True) or None,
@@ -470,8 +560,24 @@ class Project:
                                 losses=L.get("losses") or None, log=log)
         except EnergyError as e:
             raise ProjectError(str(e)) from e
-        res["notes"] = res["notes"] + [f_note.capitalize() + ".", a_note.capitalize() + ".",
-                                       f"Air density at hub height {rho:.3f} kg/m3 ({rho_src})."]
+        res["notes"] = res["notes"] + [n[0].upper() + n[1:] + "." for n in (f_note, a_note, self.vane_offset()[1]) if n] + (
+            [scale["lean"]] if scale["lean"] else []) + [f"Air density at hub height {rho:.3f} kg/m3 ({rho_src})."]
+        res["annual_mean_ws"], res["annual_mean_height_m"], res["climate_scale"] = scale["mean_ws"], clim["height_m"], scale["scale"]
+        res["warnings"] = self.warnings(clim) + list(wf.cautions) + list(res.pop("cautions", []))
+        res["given_layout"] = bool(given)
+        if given:
+            names = [g["name"] for g in given]
+            if len(set(names)) == len(names):
+                for q, name in zip(res["positions"], names):
+                    q["id"] = name
+            r_, c_ = grid.index(fixed[0], fixed[1])
+            off = [q["id"] for q, ok in zip(res["positions"], mask[r_, c_]) if not ok]
+            res["notes"].insert(0, f"The {len(given)} turbine positions were given, not designed: number of turbines, "
+                                   "spacing rules and fine-tuning were not applied.")
+            if off:
+                res["warnings"].append(f"{len(off)} of the {len(given)} given positions {'is' if len(off) == 1 else 'are'} outside the buildable area "
+                                       f"of your constraints: {', '.join(off[:12])}{' and others' if len(off) > 12 else ''}.")
+            res["outside_buildable"] = off
         res["constraints"] = rep
         res["rules"] = {k: getattr(rules, k) for k in ("radius_km", "slope_max_pct", "elevation_max_m", "min_mean_ws",
                                                        "exclusion_buffer_m", "line_buffer_m", "receptor_setback_m")}

@@ -57,6 +57,24 @@ def test_demo_long_term_and_map(project):
     assert (project.folder / m["map"]).is_file() and (project.folder / m["map_print"]).is_file()
     assert m["engine"] == "linear" and m["min_ws"] < m["mast_mean_ws"] <= m["max_ws"] + 1e-9
     assert m["lt_factor"] == pytest.approx(lt["factor"])
+    # the map stands on the long-term mean itself, carried to the map height with the measured shear
+    d = project.result("data")
+    assert m["annual_mean_ws"] == pytest.approx(lt["long_term"])
+    assert m["mast_mean_ws"] == pytest.approx(lt["long_term"] * (m["height_m"] / d["top_height_m"]) ** d["shear_alpha"], rel=1e-6)
+
+
+def test_a_long_term_correction_older_than_the_data_is_not_used(tmp_path):
+    p = demo.create(tmp_path / "Demo Ridge", today=TODAY)
+    p.run("data", log=quiet)
+    p.run("longterm", log=quiet)
+    assert p.speed_scale()["mean_ws"] == pytest.approx(p.result("longterm")["long_term"])
+    assert p.warnings(p.climate()) == []
+    p.s["results"]["longterm"]["cautions"] = ["Only 5 of the 12 calendar months were measured."]
+    assert p.warnings(p.climate()) == ["Only 5 of the 12 calendar months were measured."]      # carried to the map and the energy
+    p.s["results"]["data"]["at"] = "2099-01-01 00:00:00"            # the mast data were checked again afterwards
+    assert p.status("longterm") == "stale"
+    with pytest.raises(ProjectError, match="Run step 2"):
+        p.speed_scale()
 
 
 def test_demo_layout_respects_every_constraint(project):
@@ -96,6 +114,9 @@ def test_demo_environment_and_pack(project):
             "map_layout.png", "noise_at_homes.csv", "shadow_flicker_at_homes.csv"} <= names
     page = (folder / "index.html").read_text(encoding="utf-8")
     assert "[COMPLIANCE]" in page and "does not replace" in page and "makes no statement about what" in page
+    lt = project.result("longterm")
+    assert f"Long-term mean {lt['long_term']:.2f} m/s at 80 m" in page and f"times a long-term factor of {lt['factor']:.3f}" in page
+    assert "Check before relying on these figures" not in page          # the demo gives no cause for one
     gj = json.loads((folder / "layout.geojson").read_text())
     kinds = [f["properties"]["kind"] for f in gj["features"]]
     assert kinds.count("turbine") == 10 and kinds.count("met mast") == 1 and kinds.count("home") == 40
@@ -111,10 +132,51 @@ def test_a_new_data_run_marks_later_steps_out_of_date(project, tmp_path):
     p.run("data", log=quiet)
     assert p.status("data") == "done" and p.status("longterm") == "stale" and p.status("map") == "stale"
     assert p.status("layout") == "done"          # still based on the same map run; the map itself is what is stale
+    with pytest.raises(ProjectError, match="Run step 2"):          # the old long-term mean belongs to the old data
+        p.run("map", log=quiet)
+    p.run("longterm", log=quiet)
+    assert p.status("layout") == "stale"         # the layout rests on the long-term mean too
     p.run("map", log=quiet)
-    assert p.status("layout") == "stale" and p.status("pack") == "done"
+    assert p.status("map") == "done" and p.status("layout") == "stale" and p.status("pack") == "done"
     state = p.state()
     assert [s["key"] for s in state["steps"]] == list(STEPS) and "results" not in state
+
+
+def test_a_layout_of_your_own_is_taken_as_given(project, tmp_path):
+    import shutil
+    copy = tmp_path / "copy"
+    shutil.copytree(project.folder, copy)
+    p = Project.open(copy)
+    designed = p.result("layout")
+    p.attach("positions", copy / "layout" / "turbines.csv")          # the application's own table is a valid positions file
+    p.update("layout", {"n_turbines": 3})                            # not used: the file decides
+    res = p.run("layout", log=quiet)
+    assert res["given_layout"] and res["n_placed"] == res["n_requested"] == designed["n_placed"]
+    assert [q["id"] for q in res["positions"]] == [q["id"] for q in designed["positions"]]
+    assert res["p50_gwh"] == pytest.approx(designed["p50_gwh"], rel=1e-3) and res["outside_buildable"] == []
+    assert "were given, not designed" in res["notes"][0]
+    # a turbine on ground the constraints rule out is worked out all the same, and named
+    home = p.features("receptors")[0].coords[0]
+    good = designed["positions"][0]
+    own = tmp_path / "own.csv"
+    own.write_text(f"name,lat,lon\nA1,{good['lat']:.6f},{good['lon']:.6f}\nAt a home,{home[0]:.6f},{home[1]:.6f}\n", encoding="utf-8")
+    p.attach("positions", own)
+    res = p.run("layout", log=quiet)
+    assert res["n_placed"] == 2 and res["outside_buildable"] == ["At a home"]
+    assert any("outside the buildable area" in w and "At a home" in w for w in res["warnings"])
+    page = (p.folder / p.run("pack", log=quiet)["index"]).read_text(encoding="utf-8")
+    assert "Check before relying on these figures" in page and "At a home" in page      # the pack carries the warning
+    # a position off the map stops the run with a message that says what to do
+    own.write_text(f"name,lat,lon\nA1,{good['lat']:.6f},{good['lon']:.6f}\nFar away,{good['lat'] + 1:.6f},{good['lon']:.6f}\n", encoding="utf-8")
+    p.attach("positions", own)
+    with pytest.raises(ProjectError, match="1 of the 2 turbine positions given lies outside the mapped area"):
+        p.run("layout", log=quiet)
+    # removing the file brings the designed layout back
+    p.update("layout", {"positions_file": "", "n_turbines": designed["n_requested"]})
+    res = p.run("layout", log=quiet)
+    assert not res["given_layout"] and res["n_placed"] == designed["n_placed"]
+    with pytest.raises(ProjectError, match="holds no points"):
+        p.attach("positions", copy / p.s["layout"]["boundary_file"])
 
 
 def test_project_guards(tmp_path):
@@ -139,6 +201,17 @@ def test_project_guards(tmp_path):
     p.update("data", {"folder": str(empty)})
     with pytest.raises(ProjectError, match="No logger files were recognised"):
         p.run("data", log=quiet)
+    assert p.s["map"]["res_m"] == 50.0                                 # the default cell follows narrow ridges
+
+
+def test_a_map_too_big_to_hold_is_refused_with_a_cell_size_that_fits(project, tmp_path):
+    import shutil
+    copy = tmp_path / "copy"
+    shutil.copytree(project.folder, copy)
+    p = Project.open(copy)
+    p.update("map", {"half_km": 30.0, "res_m": 50.0})
+    with pytest.raises(ProjectError, match="2.2 million cells.*Use cells of 60 m or more"):
+        p.run("map", log=quiet)
 
 
 def test_intake_detects_formats(tmp_path, project):
@@ -173,11 +246,26 @@ def test_daily_intake_runs_only_on_new_files_and_alerts_when_silent(project, tmp
     st = watch.check_once(p, log=quiet, now=now)
     assert st["ran"] is True and st["history"][0]["new_records"] == 144 and st["state"] == "ok"
     assert "144 new records" in st["message"] and len(st["history"]) == 2
+    assert st["history"][0]["new_findings"] == [] and "0 new findings" in st["message"]     # the summary line is not news
     late = watch.check_once(p, log=quiet, now=datetime(2026, 11, 9, 6, 0))
     assert late["state"] == "stale" and "8.3 days old" in late["message"]
     assert json.loads((copy / "intake" / "status.json").read_text())["state"] == "stale"
     p.update("data", {"folder": str(tmp_path / "gone")})
     assert watch.check_once(p, log=quiet)["state"] == "error"
+
+
+def test_intake_news_is_what_changed_not_what_was_recounted():
+    from bohemian_wind import DISCLAIMER
+    before = ["Data: 8,352 ten-minute records from 01 Sep 2026 00:10 to 29 Oct 2026 00:00; 0 of 8,352 expected timestamps missing.",
+              "RH 9 m (Ch17): output at its zero value in 2,390 records (16 Jul 2025 to 14 Feb 2026).",
+              "No data from 16 Nov 2025 to 20 Nov 2025 (4.1 days).", DISCLAIMER]
+    after = ["Data: 8,496 ten-minute records from 01 Sep 2026 00:10 to 30 Oct 2026 00:00; 0 of 8,496 expected timestamps missing.",
+             "RH 9 m (Ch17): output at its zero value in 2,534 records (16 Jul 2025 to 15 Feb 2026).",
+             "No data from 16 Nov 2025 to 20 Nov 2025 (4.1 days).", "No data from 02 Mar 2026 to 03 Mar 2026 (1.2 days).",
+             "V4 WS 40 m: dead or fixed for 20 hours.", DISCLAIMER]
+    assert watch.news(before, after) == ["No data from 02 Mar 2026 to 03 Mar 2026 (1.2 days).", "V4 WS 40 m: dead or fixed for 20 hours."]
+    assert watch.news([], after) == after[1:5]                          # a first run: everything but the summary and the disclaimer
+    assert watch.news(after, after) == [] and watch.news(after, before) == []
 
 
 def _call(url, token=None, body=None, host=None):
@@ -244,3 +332,27 @@ def test_application_interface_and_its_locks(project, tmp_path, monkeypatch):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_vane_correction_turns_the_wind_and_sensor_settings_reach_the_reader(project, tmp_path):
+    import shutil
+    copy = tmp_path / "copy"
+    shutil.copytree(project.folder, copy)
+    p = Project.open(copy)
+    before = p.result("layout")["prevailing_deg"]
+    p.update("data", {"direction_offset_deg": -40})
+    assert p.vane_offset()[0] == -40.0
+    p.run("map", log=quiet)
+    lay = p.run("layout", log=quiet)
+    assert lay["prevailing_deg"] == pytest.approx((before - 40.0) % 360.0, abs=0.5)
+    assert any("turned by -40 degrees" in n for n in lay["notes"]) and any("turned by -40" in n for n in p.result("map")["notes"])
+    # sensor settings by port: cleaned, replaced as a whole, and written into the file the reader is given
+    p.update("data", {"channels": {"a4": {"height_m": 78, "direction_offset_deg": -28}, "A6": {"height_m": None}, "": {"height_m": 3}}})
+    assert p.s["data"]["channels"] == {"A4": {"height_m": 78.0, "direction_offset_deg": -28.0}}
+    p.run("data", log=quiet)
+    sent = json.loads((copy / "runs" / "reader_settings.json").read_text())
+    assert sent["channels"] == {"A4": {"height_m": 78.0, "direction_offset_deg": -28.0}} and sent["latitude"] == -5.0
+    p.update("data", {"channels": {}})
+    assert p.s["data"]["channels"] == {}
+    with pytest.raises(ProjectError):
+        p.update("data", {"channels": {"A4": {"height_m": 999}}})
