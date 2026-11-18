@@ -52,8 +52,9 @@ sys.stdout.write(p or "")
 
 
 def projects_home() -> Path:
+    """Where new projects and the demo go unless another folder is chosen."""
     docs = Path.home() / "Documents"
-    return (docs if docs.is_dir() else Path.home()) / "Bohemian Wind projects"
+    return (docs if docs.is_dir() else Path.home()) / "Bohemian Wind" / "projects"
 
 
 class Job:
