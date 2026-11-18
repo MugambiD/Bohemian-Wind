@@ -2,6 +2,9 @@
 
 Prototype for Bohemian Wind QC v0.2. The v0.1.3 program (.exe) reads NRG SymphoniePRO exports only; this
 script reads Campbell Scientific TOA5 files and runs the same checks and statistics from the source code.
+Three text formats are read into the same shape and take the same run: SecondWind Nomad2 Multi-Track exports
+(loggers/nomad2.py), NRG Symphonie text exports from Symphonie Data Retriever (loggers/nrg_sdr.py) and WindPRO
+time series exports (loggers/windpro.py).
 
   python tools/toa5_mast.py <data folder> [<data folder> ...] --out "<Bohemian Wind QC outputs>" --name "My mast"
          [--settings <site settings .json>] [--extract] [--power-daily <.json> --power-monthly <.json>]
@@ -25,6 +28,13 @@ Rules
     or more while the other cups read 3 m/s or more;
   * vane fixed at one reading: 10-minute averages within 1 deg for 6 h or more while the cups read 3 m/s or more.
   Either flags the whole still spell as 'stuck', calm hours included.
+- A cup or vane that is dead or fixed for more than half of the records it logged, and never clear of an outage
+  for 60 days in a row, is left out of the statistics altogether: a sensor that keeps dropping out is not
+  measuring between the outages either. One that died once after months of good data keeps those months.
+- A cup the files give two heights: its readings are set against a cup that stayed put. A step that fits the shear
+  between the two heights is a move, and each spell is analysed at its own height. No step means the sensor
+  stayed where it was and only the label changed: the earlier spell is left out until the height is given for the
+  whole record in the sensor settings.
 - Monthly means count only months with at least 70% valid records at that height.
 - Long-term index (optional): NASA POWER wind speed at 50 m (MERRA-2; POWER appends GEOS-IT for the latest
   weeks), by tools/windmap.long_term.
@@ -53,7 +63,21 @@ from ..pipeline import safe_name, write_inventory
 from ..points import Sensor
 from ..qc import FLAG_ORDER, _runs, flag_periods, flag_summary, recovery_by_month, run_qc
 from ..sympro import Dataset, distance_m, merge_duplicates
-from . import nomad2  # SecondWind Nomad2 Multi-Track exports, read into the same shape as TOA5
+from . import nomad2, nrg_sdr, windpro  # text exports of other loggers and tools, read into the same shape as TOA5
+
+# formats told apart by their first lines; anything else with a .dat name is taken as TOA5
+TEXT_READERS = ((nomad2.looks_like_nomad2, nomad2.read_nomad2), (nrg_sdr.looks_like_sdr, nrg_sdr.read_sdr),
+                (windpro.looks_like_windpro, windpro.read_windpro))
+FORMATS_READ = ("Campbell Scientific TOA5, SecondWind Nomad2 Multi-Track export, NRG Symphonie text export, "
+                "WindPRO time series export")
+
+
+def text_reader(path):
+    """The reader for a text export, or None when the file is none of the text formats."""
+    for sniff, read in TEXT_READERS:
+        if sniff(path):
+            return read
+    return None
 
 TOOLS = Path(__file__).resolve().parents[2] / "tools"     # the atlas prototype (windmap.py) still lives there
 
@@ -64,7 +88,7 @@ def _windmap():
     import windmap  # noqa: PLC0415
     return windmap
 
-READER = "toa5_mast.py 0.2.1-dev"
+READER = "toa5_mast.py 0.2.2-dev"
 COL = re.compile(r"^(?P<sid>[A-Za-z]+\d*)_(?P<h>\d+(?:\.\d+)?)m_(?P<stat>Avg|Std|Min|Max)$")
 KINDS = {"V": ("wind_speed", "Anem", "WS"), "D": ("wind_direction", "Vane", "WD"),
          "TA": ("temperature", "Temp", "T"), "RH": ("humidity", "RH", "RH"), "PA": ("pressure", "Baro", "P")}
@@ -76,6 +100,13 @@ MIN_POINT_DAYS = 60.0
 VISIT_GAP, VISIT_PAD = pd.Timedelta(hours=24), pd.Timedelta(hours=1)
 PART_SHARE = 0.95
 STILL_RECORDS, REF_WS, VANE_STILL_DEG, NEAR_OFFSET_MS = 36, 3.0, 1.0, 0.5
+UNRELIABLE_SHARE = 0.5   # dead or fixed for more than this share of its record, and never clear of an outage for
+#                          MIN_POINT_DAYS in a row: nothing the sensor logged is used
+LISTED_SPELLS = 3        # a sensor with more dead spells than this gets one line in the findings, not one per spell
+# a cup the files give two heights, set against a cup that stayed put: a move that would change its readings by less
+# than MIN_STEP_PCT cannot be told from no move; a step under LABEL_ONLY of what the move would give means only the
+# label changed; a step within MOVED of it means the cup moved
+MIN_STEP_PCT, LABEL_ONLY, MOVED, MIN_STEP_RECORDS = 1.5, 0.4, 0.5, 200
 REF_JUMP = 0.25  # a trailing reference month whose mast-to-reference ratio is this far off is left out
 MIN_MONTH_SHARE = 0.70
 G, R_DRY, R_VAP = 9.80665, 287.05, 461.5
@@ -135,17 +166,22 @@ def read_toa5(path: Path):
 
 
 def load(folders: list, log=print, channels: dict | None = None) -> dict:
-    """folders: data folders (every *.dat under them) or single files. A single file lets one mast be read from a
-    folder that holds several (the run still stops if the files read carry more than one station).
-    channels: per-port settings for formats whose files do not carry them (Nomad2 heights)."""
+    """folders: data folders (every *.dat under them, and every .txt or .csv that is one of the text exports read)
+    or single files. A single file lets one mast be read from a folder that holds several (the run still stops if
+    the files read carry more than one station).
+    channels: per-port settings for formats whose files do not carry them (Nomad2 heights, vane north offsets)."""
+    def wanted(p: Path) -> bool:
+        suf = p.suffix.lower()
+        return p.is_file() and (suf == ".dat" or (suf in (".txt", ".csv") and text_reader(p) is not None))
+
     paths = sorted({p.resolve() for f in folders if Path(f).is_file() for p in [Path(f)]}
-                   | {p.resolve() for f in folders if Path(f).is_dir() for p in Path(f).rglob("*")
-                      if p.is_file() and p.suffix.lower() == ".dat"})
+                   | {p.resolve() for f in folders if Path(f).is_dir() for p in Path(f).rglob("*") if wanted(p)})
     frames, infos, errors = [], [], []
     for p in paths:
         try:
-            if nomad2.looks_like_nomad2(p):
-                info, df = nomad2.read_nomad2(p, channels)
+            read = text_reader(p)
+            if read is not None:
+                info, df = read(p, channels)
             else:
                 info, df = read_toa5(p)
         except Exception as e:  # keep going; report the file
@@ -158,8 +194,7 @@ def load(folders: list, log=print, channels: dict | None = None) -> dict:
         infos.append(info)
         frames.append(df)
     if not frames:
-        raise SystemExit("No readable logger files found (formats read: Campbell Scientific TOA5, SecondWind Nomad2 "
-                         "Multi-Track export). " + "; ".join(errors[:3]))
+        raise SystemExit(f"No readable logger files found (formats read: {FORMATS_READ}). " + "; ".join(errors[:3]))
     formats = sorted({i.get("format", "Campbell Scientific TOA5") for i in infos})
     if len(formats) > 1:
         raise SystemExit(f"The files read are in more than one format ({', '.join(formats)}). Select one mast's data.")
@@ -178,7 +213,7 @@ def load(folders: list, log=print, channels: dict | None = None) -> dict:
     data, removed, conflict_times, conflict_rows, conflicts = merge_duplicates(data, names)
     source = data.pop("_src").astype(int)
     prog = data.pop("_prog").ffill().bfill().astype(int)
-    log(f"  {len(paths)} .dat files, {len(infos)} read, {len(errors)} unreadable; {len(data):,} records "
+    log(f"  {len(paths)} data files, {len(infos)} read, {len(errors)} unreadable; {len(data):,} records "
         f"{data.index[0]:%Y-%m-%d %H:%M} to {data.index[-1]:%Y-%m-%d %H:%M}; {removed:,} repeated records merged; "
         f"{len(conflict_times):,} conflicting timestamps quarantined.")
     return {"paths": paths, "infos": infos, "errors": errors, "programs": programs, "prog": prog, "source": source,
@@ -208,12 +243,32 @@ def _bases(cols) -> list:
                               if c not in ("TIMESTAMP", "RECORD", "ProgName")))
 
 
+def settings_changes(before: dict | None, now: dict | None) -> list:
+    """What differs between two sets of logger settings, in words: 'CH4 height 80 m to 60 m'. The settings are
+    {channel: {field: value}} as a reader hands them on (info["settings"]); readers that have none give no list."""
+    if not before or not now:
+        return []
+    order = lambda k: (int(re.sub(r"\D", "", str(k)) or 0), str(k))  # noqa: E731
+    out = []
+    for key in sorted(set(before) | set(now), key=order):
+        a, b = before.get(key), now.get(key)
+        if a is None or b is None:
+            out.append(f"{key} {'added' if a is None else 'removed'}")
+            continue
+        for field in b:
+            if str(a.get(field, "")).strip() != str(b[field]).strip():
+                out.append(f"{key} {field.lower()} {str(a.get(field, '')).strip() or 'blank'} to "
+                           f"{str(b[field]).strip() or 'blank'}")
+    return out
+
+
 def configurations(infos: list, programs: list) -> pd.DataFrame:
     rows, prev = [], None
     for p in programs:
         fs = [i for i in infos if i["program"] == p]
         names = fs[0]["names"]
         bases = _bases(names)
+        changed = settings_changes(prev["settings"] if prev else None, fs[0].get("settings"))
         added = [b for b in bases if prev is not None and b not in prev["bases"]]
         dropped = [b for b in (prev["bases"] if prev else []) if b not in bases]
         reordered = []
@@ -226,11 +281,39 @@ def configurations(infos: list, programs: list) -> pd.DataFrame:
                         reordered.append(b)
         rows.append({"program": p, "first_record": min(i["first"] for i in fs), "last_record": max(i["last"] for i in fs),
                      "files": len(fs), "columns": len(names), "added": ", ".join(added), "removed": ", ".join(dropped),
-                     "statistics_reordered": ", ".join(reordered),
+                     "statistics_reordered": ", ".join(reordered), "settings_changed": "; ".join(changed),
                      "logger": f"{fs[0]['model']} s/n {fs[0]['serial']}, OS {fs[0]['os']}",
                      "program_signature": fs[0]["signature"], "table": fs[0]["table"]})
-        prev = {"bases": bases, "names": names}
+        prev = {"bases": bases, "names": names, "settings": fs[0].get("settings")}
     return pd.DataFrame(rows)
+
+
+def header_site(infos: list) -> dict:
+    """Position, elevation and clock offset written in the file headers (NRG Symphonie text exports): the median
+    over the files, how far the files disagree, and a sentence for the findings. Empty when no header gives any."""
+    sites = [i["site"] for i in infos if isinstance(i.get("site"), dict)]
+    out, bits = {}, []
+    here = [(s["lat"], s["lon"]) for s in sites if s.get("lat") is not None and s.get("lon") is not None]
+    if here:
+        out["lat"], out["lon"] = float(np.median([a for a, _ in here])), float(np.median([b for _, b in here]))
+        spread = max(distance_m((out["lat"], out["lon"]), xy) for xy in here)
+        bits.append(f"position {out['lat']:.5f}, {out['lon']:.5f}"
+                    + (f" (the files differ by up to {spread:.0f} m)" if spread >= 1.0 else ""))
+    el = [float(s["elevation_m"]) for s in sites if s.get("elevation_m")]
+    if el:
+        out["elevation_m"] = float(np.median(el))
+        bits.append(f"elevation {out['elevation_m']:g} m"
+                    + (f" ({min(el):g} to {max(el):g} m in the files)" if max(el) - min(el) >= 1.0 else "")
+                    + ", taken as metres (the files give no unit)")
+    off = [float(s["utc_offset_h"]) for s in sites if s.get("utc_offset_h") is not None]
+    if off:
+        v = max(set(off), key=off.count)
+        out["time_zone"] = f"UTC{v:+g}"
+        bits.append(f"logger clock {out['time_zone']}")
+    if bits:
+        out["note"] = ("Site data read from the file headers: " + "; ".join(bits)
+                       + ". A position or elevation entered for the project takes their place.")
+    return out
 
 
 def gps_position(data: pd.DataFrame) -> dict | None:
@@ -396,42 +479,114 @@ def still_spells(data: pd.DataFrame, sensors: list, qcr: dict) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def relocation_check(data: pd.DataFrame, pts: list, qcr: dict, alpha: dict) -> pd.DataFrame:
-    """Sensors logged at two heights: does the step in their ratio to a fixed cup fit a physical move?"""
+def unreliable(data: pd.DataFrame, sensors: list, qcr: dict, spells: pd.DataFrame) -> pd.DataFrame:
+    """Cups and vanes whose outages leave nothing to trust: dead or fixed for more than half of the records they
+    logged, and never clear of an outage for MIN_POINT_DAYS in a row. A sensor that drops out and comes back that
+    often is not measuring in between either, so its whole record is flagged 'stuck'. One row per sensor."""
+    step = float(qcr["time"].get("interval_s") or 600.0)
+    rows = []
+    for s in sensors:
+        if s.kind not in ("wind_speed", "wind_direction") or s.label not in qcr["flags"]:
+            continue
+        logged = data[s.avg_col].notna()
+        n = int(logged.sum())
+        stuck = qcr["flags"][s.label]["stuck"] & logged
+        if not n or float(stuck.sum()) <= UNRELIABLE_SHARE * n:
+            continue
+        clear = (~stuck)[logged.to_numpy()]
+        longest = max((r[2] for r in _runs(clear)), default=0) * step / 86400.0
+        if longest >= MIN_POINT_DAYS:
+            continue
+        mine = spells[spells["sensor"] == s.label] if len(spells) else spells
+        rows.append({"sensor": s.label, "records_logged": n, "dead_or_fixed_%": 100.0 * float(stuck.sum()) / n,
+                     "spells": int(len(mine)), "longest_clear_days": round(longest, 1),
+                     "records_between_outages": int(n - stuck.sum())})
+        qcr["flags"][s.label]["stuck"] = qcr["flags"][s.label]["stuck"] | logged
+        qcr["valid"][s.label] = qcr["valid"][s.label] & ~logged
+    return pd.DataFrame(rows)
+
+
+def relocation_check(data: pd.DataFrame, pts: list, qcr: dict, alpha: dict | None = None, skip=()) -> pd.DataFrame:
+    """Cups the files give two heights: does the step in their ratio to a cup that stayed put fit a physical move,
+    or did only the label change? Two rows per change (reference 4 m/s or more, 8 m/s or more), each with a verdict:
+    'moved', 'label only', 'unclear' or 'cannot tell'. skip: sensors that are not to serve as the reference.
+    alpha: pair exponents {(lower, upper): exponent}, used only where the cups that stayed put measure no shear."""
     valid = qcr["valid"]
+    sid_of = lambda s: s.meta["Description"].split(" at ")[0]  # noqa: E731
     by_sid = {}
     for s, temp in pts:
         if s.kind == "wind_speed":
-            sid = s.meta["Description"].split(" at ")[0]
-            by_sid.setdefault(sid, []).append((s, temp))
-    fixed = [s for s, temp in pts if s.kind == "wind_speed" and not temp
-             and len(by_sid[s.meta["Description"].split(" at ")[0]]) == 1]
+            by_sid.setdefault(sid_of(s), []).append((s, temp))
+    fixed = [s for s, temp in pts if s.kind == "wind_speed" and not temp and len(by_sid[sid_of(s)]) == 1
+             and s.label not in skip and s.label in valid and bool(valid[s.label].any())]
+    if not fixed:
+        return pd.DataFrame()
+    # the shear between the cups that stayed put, lowest against highest: what a move would do to the readings
+    a_fixed, heights = np.nan, sorted({s.height for s in fixed})
+    if len(heights) > 1 and heights[-1] / heights[0] >= 1.15:
+        ends = [pd.concat([data[s.avg_col].where(valid[s.label]) for s in fixed if s.height == h], axis=1).mean(axis=1)
+                for h in (heights[0], heights[-1])]
+        m = (ends[0] >= 4.0) & (ends[1] >= 4.0)
+        if int(m.sum()) >= MIN_STEP_RECORDS:
+            a_fixed = float(np.log(ends[1][m].mean() / ends[0][m].mean()) / np.log(heights[-1] / heights[0]))
     rows = []
     for sid, items in by_sid.items():
         if len(items) < 2:
             continue
-        old = next((s for s, temp in items if temp), None)
-        new = next((s for s, temp in items if not temp), None)
-        if old is None or new is None:
-            continue
-        refh = min({s.height for s in fixed}, key=lambda h: abs(h - new.height))
-        refs = [s for s in fixed if s.height == refh]
-        ref = pd.concat([data[s.avg_col].where(valid[s.label]) for s in refs], axis=1).mean(axis=1)
-        o = (data[old.avg_col].where(valid[old.label]) / ref)
-        n = (data[new.avg_col].where(valid[new.label]) / ref)
-        months = sorted(set(o.dropna().index.month))
-        for lab, lim in (("all records, reference 4 m/s or more", 4.0), ("reference 8 m/s or more", 8.0)):
-            om = o[(ref >= lim)].dropna()
-            nm = n[(ref >= lim) & n.index.month.isin(months)].dropna()
-            a = alpha.get((min(new.height, refh), max(new.height, refh)), np.nan)
+        items = [(s, temp, data[s.avg_col].first_valid_index()) for s, temp in items]
+        items = sorted([i for i in items if i[2] is not None], key=lambda i: i[2])
+        for (old, old_temp, _t0), (new, new_temp, t1) in zip(items, items[1:]):
+            refh = min({s.height for s in fixed}, key=lambda h: (abs(h - new.height), -h))
+            refs = [s for s in fixed if s.height == refh]
+            ref = pd.concat([data[s.avg_col].where(valid[s.label]) for s in refs], axis=1).mean(axis=1)
+            o = (data[old.avg_col].where(valid[old.label]) / ref)
+            n = (data[new.avg_col].where(valid[new.label]) / ref)
+            months = sorted(set(o.dropna().index.month) & set(n.dropna().index.month))
+            a = a_fixed
+            if not np.isfinite(a) and alpha:
+                a = alpha.get((min(new.height, refh), max(new.height, refh)), np.nan)
             expect = (old.height / new.height) ** a if np.isfinite(a) else np.nan
-            rows.append({"sensor": sid, "logged_before": f"{old.height:g} m, {old.label}", "logged_after": f"{new.height:g} m",
-                         "reference": f"{' + '.join(s.label for s in refs)} (mean)", "records": lab,
-                         "ratio_before": float(om.median()) if len(om) else np.nan, "n_before": int(len(om)),
-                         "ratio_after_same_months": float(nm.median()) if len(nm) else np.nan, "n_after": int(len(nm)),
-                         "observed_step_%": (float(om.median()) / float(nm.median()) - 1) * 100 if len(om) and len(nm) else np.nan,
-                         "step_if_moved_%": (expect - 1) * 100, "shear_used": a})
+            for lab, lim in (("all records, reference 4 m/s or more", 4.0), ("reference 8 m/s or more", 8.0)):
+                om = o[(ref >= lim)].dropna()
+                nm = n[(ref >= lim)].dropna()
+                same = False
+                if months:      # the same calendar months on both sides, so the season does not pass for a step
+                    om2, nm2 = om[om.index.month.isin(months)], nm[nm.index.month.isin(months)]
+                    if len(om2) and len(nm2) and (len(om2) == len(om) or min(len(om2), len(nm2)) >= MIN_STEP_RECORDS):
+                        om, nm, same = om2, nm2, True
+                enough = len(om) >= MIN_STEP_RECORDS and len(nm) >= MIN_STEP_RECORDS
+                step = (float(om.median()) / float(nm.median()) - 1) * 100 if len(om) and len(nm) else np.nan
+                moved = (expect - 1) * 100
+                if not enough or not np.isfinite(step) or not np.isfinite(moved) or abs(moved) < MIN_STEP_PCT:
+                    verdict = "cannot tell"
+                elif abs(step) < LABEL_ONLY * abs(moved):
+                    verdict = "label only"
+                elif abs(step - moved) < MOVED * abs(moved):
+                    verdict = "moved"
+                else:
+                    verdict = "unclear"
+                rows.append({"sensor": sid, "logged_before": f"{old.height:g} m, {old.label}", "logged_after": f"{new.height:g} m",
+                             "changed": t1, "reference": " + ".join(s.label for s in refs) + (" (mean)" if len(refs) > 1 else ""),
+                             "records": lab,
+                             "same_calendar_months": same,
+                             "ratio_before": float(om.median()) if len(om) else np.nan, "n_before": int(len(om)),
+                             "ratio_after_same_months": float(nm.median()) if len(nm) else np.nan, "n_after": int(len(nm)),
+                             "observed_step_%": step, "step_if_moved_%": moved, "shear_used": a, "verdict": verdict,
+                             "short_spell": bool(old_temp or new_temp), "old_point": old.label, "new_point": new.label})
     return pd.DataFrame(rows)
+
+
+def relabel_verdicts(reloc: pd.DataFrame) -> pd.DataFrame:
+    """One row per height change: the 8 m/s comparison where it has the records, else the 4 m/s one."""
+    if not len(reloc):
+        return reloc
+    keep = []
+    for _key, g in reloc.groupby(["sensor", "old_point", "new_point"], sort=False):
+        strong = g[g["records"].str.startswith("reference 8")]
+        told = strong[strong["verdict"] != "cannot tell"]
+        keep.append(told.iloc[0] if len(told) else g[g["verdict"] != "cannot tell"].iloc[0]
+                    if (g["verdict"] != "cannot tell").any() else strong.iloc[0] if len(strong) else g.iloc[0])
+    return pd.DataFrame(keep).reset_index(drop=True)
 
 
 # ---------- statistics ----------
@@ -611,13 +766,22 @@ def main(argv=None, log=None):
     data, infos, programs, prog = L["data"], L["infos"], L["programs"], L["prog"]
     cfg = configurations(infos, programs)
     pos = gps_position(data)
-    lat = settings.get("latitude", pos["lat"] if pos else None)
-    lon = settings.get("longitude", pos["lon"] if pos else None)
-    elev = settings.get("elevation_m")
+    hdr = header_site(infos)
+    if hdr.get("note"):
+        L["notes"].append(hdr["note"])
+        say(f"  {hdr['note']}")
+    lat = settings.get("latitude", pos["lat"] if pos else hdr.get("lat"))
+    lon = settings.get("longitude", pos["lon"] if pos else hdr.get("lon"))
+    elev = settings.get("elevation_m", hdr.get("elevation_m"))
+    pos_source = ("site settings" if "latitude" in settings else "logger GPS median" if pos
+                  else "file headers" if hdr.get("lat") is not None else "")
+    elev_source = settings.get("source", "") if "elevation_m" in settings else "file headers" if elev is not None else ""
     site = {"Site Description": settings.get("site_name", name), "Site Number": infos[0]["station"],
             "Latitude": f"{lat:.7f}" if lat is not None else "", "Longitude": f"{lon:.7f}" if lon is not None else "",
-            "Elevation": f"{elev}" if elev is not None else "", "Time Zone": settings.get("time_zone", "not stated")}
-    say(f"  Station {infos[0]['station']}, {infos[0]['model']} s/n {infos[0]['serial']}; {len(programs)} logger programs.")
+            "Elevation": f"{elev}" if elev is not None else "",
+            "Time Zone": settings.get("time_zone", hdr.get("time_zone", "not stated"))}
+    say(f"  Station {infos[0]['station']}, {infos[0]['model']}" + (f" s/n {infos[0]['serial']}" if infos[0]["serial"] else "")
+        + f"; {len(programs)} logger program{'s' if len(programs) != 1 else ''}.")
     if pos:
         say(f"  Logger GPS: {pos['lat']:.6f}, {pos['lon']:.6f} ({pos['records']:,} records from {pos['first']:%d %b %Y}); "
             f"daily positions within {pos['largest_daily_offset_m']:.0f} m.")
@@ -645,6 +809,23 @@ def main(argv=None, log=None):
     spells = still_spells(data, sensors_all, qcr)
     say(f"  Added check found {len(spells)} dead or fixed sensor spells; "
         f"{int(spells['added_by_this_check'].sum()) if len(spells) else 0:,} records flagged beyond the v0.1.3 checks.")
+    # sensors the checks leave nothing of, and spells whose height is in doubt, stay out of the statistics
+    dropped = unreliable(data, sensors_all, qcr, spells)
+    gone = set(dropped["sensor"]) if len(dropped) else set()
+    reloc = relocation_check(data, pts, qcr, skip=gone)
+    verdicts = relabel_verdicts(reloc)
+    doubt = (set(verdicts.loc[(verdicts["verdict"] == "label only") & ~verdicts["short_spell"], "old_point"]) - gone
+             if len(verdicts) else set())
+    left = {**{lab: "dead or fixed for most of its record" for lab in gone},
+            **{lab: "its height label is in doubt" for lab in doubt}}
+    if left:
+        sensors = [s for s in sensors if s.label not in left]
+        for lab, why in left.items():
+            points_table.loc[points_table["point"] == lab, "analysed"] = f"no: {why}"
+        say("  Left out after the checks: " + "; ".join(f"{lab} ({why})" for lab, why in left.items()) + ".")
+    if not any(s.kind == "wind_speed" for s in sensors):
+        raise SystemExit("No anemometer in these files has data that can be used"
+                         + (": " + "; ".join(f"{lab} ({why})" for lab, why in left.items()) if left else "") + ".")
     say("Analysing wind statistics (v0.1.3) ...")
     an = analyse(ds, qcr, sensors)
     hs = an["heights"]
@@ -654,7 +835,9 @@ def main(argv=None, log=None):
     wd_top = hs[max(hs)]["wd"]
     pairs = [(hts[i], hts[j]) for i in range(len(hts)) for j in range(i + 1, len(hts))]
     shear_tab, alpha, shear_hourly = shear_pairs(hs, wd_top, pairs)
-    reloc = relocation_check(data, pts, qcr, alpha)
+    if len(reloc) and reloc["shear_used"].isna().all():  # the cups that stayed put measure no shear: use the pairs'
+        reloc = relocation_check(data, pts, qcr, alpha, skip=gone)
+        verdicts = relabel_verdicts(reloc)
 
     # per-height summary
     exp = max(qcr["time"]["expected"], 1)
@@ -766,9 +949,31 @@ def main(argv=None, log=None):
     for g0, g1, nrec in sorted(tq["gaps"], key=lambda g: -g[2]):
         if nrec >= 144:
             F.append(f"No data from {g0:%d %b %Y %H:%M} to {g1:%d %b %Y %H:%M} ({nrec * tq['interval_s'] / 86400:.1f} days).")
-    for _, r in spells.iterrows():
-        F.append(f"{r['sensor']}: dead or fixed from {r['from']:%d %b %Y %H:%M} to {r['to']:%d %b %Y %H:%M} "
-                 f"({r['days']:.1f} days; reading {r['reading']}); flagged as 'stuck' for the whole spell.")
+    step_days = tq["interval_s"] / 86400.0
+    by_sensor = {lab: g for lab, g in spells.groupby("sensor", sort=False)} if len(spells) else {}
+    for _, d in dropped.iterrows() if len(dropped) else []:
+        g = by_sensor.pop(d["sensor"], None)
+        what = (f" ({len(g)} spell{'s' if len(g) != 1 else ''} between {g['from'].min():%d %b %Y} and "
+                f"{g['to'].max():%d %b %Y}, the longest {g['days'].max():.1f} days; reading {g['reading'].mode().iloc[0]})"
+                if g is not None and len(g) else "")
+        if d["dead_or_fixed_%"] >= 99.5:
+            F.append(f"{d['sensor']}: dead or fixed for the whole record{what}. The sensor is left out of the statistics.")
+            continue
+        F.append(f"{d['sensor']}: dead or fixed for {d['dead_or_fixed_%']:.0f}% of the records it logged{what}, "
+                 f"and never clear of an outage for {MIN_POINT_DAYS:g} days in a row (the longest clear stretch: "
+                 f"{d['longest_clear_days']:.1f} days). The sensor is left out of the statistics, the "
+                 f"{d['records_between_outages']:,} readings between the outages included: a sensor that keeps "
+                 "dropping out is not measuring in between either.")
+    for lab, g in by_sensor.items():
+        if len(g) <= LISTED_SPELLS:
+            for _, r in g.iterrows():
+                F.append(f"{r['sensor']}: dead or fixed from {r['from']:%d %b %Y %H:%M} to {r['to']:%d %b %Y %H:%M} "
+                         f"({r['days']:.1f} days; reading {r['reading']}); flagged as 'stuck' for the whole spell.")
+        else:
+            F.append(f"{lab}: dead or fixed in {len(g)} spells between {g['from'].min():%d %b %Y} and "
+                     f"{g['to'].max():%d %b %Y}, {g['still_records'].sum() * step_days:.1f} days in all (the longest "
+                     f"{g['days'].max():.1f} days; reading {g['reading'].mode().iloc[0]}); flagged as 'stuck' for each "
+                     "spell. The spells are listed in the workbook (Dead sensor spells).")
     fsum = flag_summary(qcr)
     for flag, what in (("range", "outside the physical limits (mean, minimum, maximum or gust, or the standard deviation)"),
                        ("spike", "isolated spikes")):
@@ -776,21 +981,39 @@ def main(argv=None, log=None):
         if len(hit):
             F.append(f"{int(hit[flag].sum()):,} record{'s' if hit[flag].sum() != 1 else ''} {what}, flagged '{flag}': "
                      + "; ".join(f"{r['sensor']} ({int(r[flag]):,})" for _, r in hit.iterrows()) + ".")
-    for _, r in reloc.iterrows():
-        if r["records"].startswith("reference 8"):
-            F.append(f"{r['sensor']} logged at {r['logged_before']} and at {r['logged_after']} afterwards. Against "
-                     f"{r['reference']}, it read {r['observed_step_%']:+.1f}% higher before the change than in the same "
-                     f"months later (winds of 8 m/s or more); a move from {r['logged_before'].split(',')[0]} to "
-                     f"{r['logged_after']} explains {r['step_if_moved_%']:+.1f}% (shear {r['shear_used']:.3f}). "
-                     "The earlier spell is left out of the statistics; confirm the change on the site visit record.")
+    for _, r in verdicts.iterrows() if len(verdicts) else []:
+        h0, winds = r["logged_before"].split(",")[0], "8 m/s or more" if r["records"].startswith("reference 8") else "4 m/s or more"
+        later = "in the same months later" if r["same_calendar_months"] else "afterwards"
+        told = np.isfinite(r["observed_step_%"]) and np.isfinite(r["step_if_moved_%"])
+        way = lambda x: f"{abs(x):.1f}% {'higher' if x > 0 else 'lower'}"  # noqa: E731
+        seen = (f"Against {r['reference']}, "
+                + (f"it read the same before the change as {later}" if abs(r["observed_step_%"]) < 0.05
+                   else f"it read {way(r['observed_step_%'])} before the change than {later}")
+                + f" (winds of {winds}); a move from {h0} to {r['logged_after']} would make it "
+                f"{way(r['step_if_moved_%'])} before than after (shear {r['shear_used']:.3f})." if told else
+                "The files do not hold enough to tell a move from a change of label (a cup that stayed put, at "
+                "another height, with records on both sides of the change).")
+        head = f"{r['sensor']} logged at {r['logged_before']} and at {r['logged_after']} from {r['changed']:%d %b %Y}. {seen} "
+        if r["short_spell"]:
+            F.append(head + "The earlier spell is left out of the statistics; confirm the change on the site visit record.")
+        elif r["old_point"] in doubt:
+            F.append(head + "The readings did not change with the label, so the sensor stayed where it was and one of "
+                     "the two heights is wrong. The earlier spell is left out of the statistics: give the sensor's "
+                     "height for the whole record in the sensor settings to use all of it.")
+        elif r["verdict"] == "moved":
+            F.append(head + "That fits a move: each spell is analysed at the height the files give.")
+        else:
+            F.append(head + "Each spell is analysed at the height the files give; confirm the change on the site "
+                     "visit record.")
     if len(cfg) > 1:
         for i in range(1, len(cfg)):
             r = cfg.iloc[i]
             bits = [f"added {r['added']}" if r["added"] else "", f"removed {r['removed']}" if r["removed"] else "",
                     f"statistics reordered for {r['statistics_reordered']}" if r["statistics_reordered"] else ""]
-            bits = [b for b in bits if b]
-            F.append(f"Logger program {r['program']} from {r['first_record']:%d %b %Y %H:%M}"
-                     + (": " + "; ".join(bits) if bits else ": same columns") + ".")
+            bits = [b for b in bits if b] or ["same columns"]
+            if r["settings_changed"]:
+                bits.append(f"logger settings changed: {r['settings_changed']}")
+            F.append(f"Logger program {r['program']} from {r['first_record']:%d %b %Y %H:%M}: " + "; ".join(bits) + ".")
     for _, w in wake.iterrows():
         if np.isfinite(w.get("observed_wake_deg", np.nan)):
             F.append(f"{w['cup']}: mast wake centred at {w['observed_wake_deg']:.0f}° ({w['wake_deficit_%']:.0f}% deficit), "
@@ -860,8 +1083,8 @@ def main(argv=None, log=None):
     summary = pd.DataFrame({"Item": ["Site", "Station / logger", "Position", "Elevation", "Period", "Records",
                                      "Logger programs", "Reader", "Checks and statistics", "Input fingerprint", "Disclaimer"],
                             "Value": [name, f"{infos[0]['station']}; {infos[0]['model']} s/n {infos[0]['serial']}",
-                                      f"{lat:.6f}, {lon:.6f} (logger GPS median)" if lat is not None else "",
-                                      f"{elev} m ({settings.get('source', '')})" if elev is not None else "",
+                                      f"{lat:.6f}, {lon:.6f} ({pos_source})" if lat is not None else "",
+                                      f"{elev} m ({elev_source})" if elev is not None else "",
                                       stats["period"], f"{len(data):,}", ", ".join(programs), READER,
                                       f"Bohemian Wind QC v{QC_VERSION} (bohemian_wind.qc, bohemian_wind.analysis)",
                                       inputs["inventory_sha256"], DISCLAIMER]})
@@ -874,6 +1097,7 @@ def main(argv=None, log=None):
               "Shear test": an["shear_test"], f"TI {hub_h:g} m": ti_hub.reset_index(),
               f"Rose {hub_h:g} m": rose_hub.reset_index() if rose_hub is not None else pd.DataFrame(),
               "Mast wake": wake, "Height relabel check": reloc, "Dead sensor spells": spells,
+              "Sensors left out": dropped,
               "Flag summary": flag_summary(qcr), "Flag periods": flag_periods(qcr),
               "Recovery % by month": rec.reset_index().rename(columns={"index": "sensor"}),
               "Measurement points": points_table, "Site visits": visits_table, "Logger programs": cfg,

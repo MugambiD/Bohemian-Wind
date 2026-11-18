@@ -8,6 +8,9 @@ Method (one method, on purpose; more will follow):
   measured. This assumes the mast-to-reference ratio holds in the months not measured, and says so.
 - The last reference months are checked before use: NASA POWER appends another model (GEOS-IT) to the end of the
   MERRA-2 series for its latest weeks, and such a month can break the mast-to-reference relation.
+- Vane north check: the mast's daily wind direction is set against the reanalysis direction at 50 m on days when
+  both read 5 m/s or more. Terrain turns the wind, so some tens of degrees are normal; a large, steady difference
+  points to a vane whose north offset is not what the settings say.
 
 [COMPLIANCE] A screening estimate. One reference and one method do not make a bankable long-term correction.
 """
@@ -29,6 +32,9 @@ POWER_CREDIT = "Long-term index: NASA Langley Research Center POWER Project (MER
 REF_JUMP = 0.25      # a trailing reference month whose mast-to-reference ratio is this far off is left out
 LT_YEARS = 20
 TAIL_MONTHS = 4        # how far back from the reference's last month its tail can be of a different make
+VANE_MIN_WS, VANE_MIN_DAYS = 5.0, 20   # the vane check: days with this wind on both sides, and how many it takes
+VANE_LIMIT_DEG = 45.0  # mast against reanalysis direction: beyond this, the vane's north is worth a look
+VANE_SPREAD_DEG = 90.0  # the middle half of the days spread wider than this: the comparison says nothing
 PARTIAL_SHARE = 0.40   # a month with this share of valid data may stand in for a calendar month that is otherwise missing
 
 
@@ -36,36 +42,83 @@ class ReferenceError_(RuntimeError):
     """The reference data could not be fetched or read."""
 
 
-def power_url(lat: float, lon: float, step: str, start: str, end: str) -> str:
-    return (f"{POWER_API.format(step=step)}?parameters=WS50M&community=RE&longitude={lon:.4f}&latitude={lat:.4f}"
+def power_url(lat: float, lon: float, step: str, start: str, end: str, parameters: str = "WS50M") -> str:
+    return (f"{POWER_API.format(step=step)}?parameters={parameters}&community=RE&longitude={lon:.4f}&latitude={lat:.4f}"
             f"&start={start}&end={end}&format=JSON")
 
 
 def fetch_power(lat: float, lon: float, dest_dir, start_year: int = 2001, today: date | None = None,
-                timeout: float = 60.0) -> dict:
+                timeout: float = 60.0, period: tuple | None = None) -> dict:
     """Downloads the monthly series for complete years and the daily series for the current year, into dest_dir.
-    Returns the two file paths. Needs an internet connection."""
+    With period (first day, last day of the measurements, "YYYY-MM-DD") the daily wind speed and direction over the
+    measurements come too, for the vane north check. Returns the file paths. Needs an internet connection."""
     today = today or date.today()
     dest = Path(dest_dir)
     dest.mkdir(parents=True, exist_ok=True)
     out = {}
-    jobs = [("monthly", str(start_year), str(today.year - 1), dest / "power_monthly.json"),
-            ("daily", f"{today.year}0101", f"{today:%Y%m%d}", dest / "power_daily.json")]
-    for step, a, b, path in jobs:
-        url = power_url(lat, lon, step, a, b)
+    jobs = [("monthly", "monthly", str(start_year), str(today.year - 1), dest / "power_monthly.json", "WS50M"),
+            ("daily", "daily", f"{today.year}0101", f"{today:%Y%m%d}", dest / "power_daily.json", "WS50M")]
+    if period:
+        jobs.append(("measured", "daily", period[0].replace("-", ""), period[1].replace("-", ""),
+                     dest / "power_daily_measured.json", "WS50M,WD50M"))
+    for key, step, a, b, path, parameters in jobs:
+        url = power_url(lat, lon, step, a, b, parameters)
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "bohemian-wind"})
             with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310 (fixed https host)
                 body = r.read()
             json.loads(body)["properties"]["parameter"]["WS50M"]
         except (urllib.error.URLError, OSError, KeyError, ValueError) as e:
-            if step == "daily" and "monthly" in out:
-                continue        # the current year is a bonus: complete years are enough
+            if key != "monthly" and "monthly" in out:
+                continue        # the current year and the vane check are extras: complete years are enough
             raise ReferenceError_(f"Could not download the reference data from NASA POWER ({e}). Check the internet "
                                   "connection, or download the file in a browser and choose 'Use a file'.") from e
         path.write_bytes(body)
-        out[step] = str(path)
+        out[key] = str(path)
     return out
+
+
+def vane_check(clim: dict, daily_path, offset: float = 0.0) -> dict | None:
+    """The mast's daily wind direction (climate["direction_days"], turned by the project's vane correction) against
+    the reanalysis direction at 50 m, on days when both read VANE_MIN_WS or more. Returns the typical difference,
+    mast minus reference, with the middle half of the days, and a caution when it is large. None when the climate
+    or the file holds no directions, or the days are too few to say anything."""
+    dd = clim.get("direction_days")
+    if not dd or not daily_path or not Path(daily_path).is_file():
+        return None
+    try:
+        p = json.loads(Path(daily_path).read_text(encoding="utf-8"))["properties"]["parameter"]
+        ref = pd.DataFrame({"ref_ws": pd.Series(p["WS50M"], dtype=float), "ref_deg": pd.Series(p["WD50M"], dtype=float)})
+        ref.index = pd.to_datetime(ref.index, format="%Y%m%d")
+    except (KeyError, ValueError, TypeError):
+        return None
+    days = pd.date_range(dd["first"], periods=len(dd["deg"]), freq="D")
+    mast = pd.DataFrame({"deg": pd.Series(dd["deg"], index=days, dtype=float), "ws": pd.Series(dd["ws"], index=days, dtype=float)})
+    j = mast.join(ref, how="inner").dropna()
+    j = j[(j["ref_ws"] >= VANE_MIN_WS) & (j["ws"] >= VANE_MIN_WS) & (j["ref_deg"] >= 0)]
+    if len(j) < VANE_MIN_DAYS:
+        return None
+    diff = np.radians((j["deg"] + float(offset) - j["ref_deg"]).to_numpy())
+    centre = float(np.degrees(np.arctan2(np.sin(diff).mean(), np.cos(diff).mean())))       # where the differences sit
+    around = (np.degrees(diff) - centre + 180.0) % 360.0 - 180.0                           # no wrap at +/-180 this way
+    wrap = lambda x: float((x + 180.0) % 360.0 - 180.0)  # noqa: E731
+    q25, med, q75 = (wrap(centre + float(np.percentile(around, q))) for q in (25, 50, 75))
+    spread = float(np.percentile(around, 75) - np.percentile(around, 25))
+    h = clim["height_m"]
+    res = {"days": int(len(j)), "median_deg": round(med, 1), "q25_deg": round(q25, 1), "q75_deg": round(q75, 1),
+           "spread_deg": round(spread, 1), "offset_applied_deg": float(offset), "min_ws": VANE_MIN_WS, "height_m": h,
+           "first_day": f"{j.index[0]:%Y-%m-%d}", "last_day": f"{j.index[-1]:%Y-%m-%d}", "caution": ""}
+    if abs(med) >= VANE_LIMIT_DEG and spread <= VANE_SPREAD_DEG:
+        res["caution"] = (
+            f"The wind direction measured at {h:g} m runs {med:+.0f} degrees from the reanalysis (NASA POWER, MERRA-2 at "
+            f"50 m) on {len(j)} days with {VANE_MIN_WS:g} m/s or more (the middle half of the days: {q25:+.0f} to "
+            f"{q75:+.0f} degrees"
+            + (f"; after the vane correction of {offset:+g} degrees entered in the project" if offset else "")
+            + "). Terrain turns the wind, but rarely this far"
+            + (", and a difference near 180 degrees is what a north mark read the wrong way round gives" if abs(med) >= 135 else "")
+            + ": check the vane's north offset against the installation record before relying on the wind rose, the "
+            "wind map and the layout.")
+    return res
 
 
 def read_power(monthly_path, daily_path=None) -> pd.Series:

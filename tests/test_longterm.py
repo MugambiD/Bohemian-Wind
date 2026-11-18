@@ -122,3 +122,102 @@ def test_a_thin_month_stands_in_for_a_calendar_month_that_is_otherwise_missing()
     res3 = lt.correct(short, ref)
     assert res3["partial_months_used"] == [] and res3["calendar_months"] == 4 and res3["indicative"]
     assert len(res3["cautions"]) == 1 and "Only 4 of the 12 calendar months" in res3["cautions"][0]
+
+
+# ---------- vane north check: the mast's daily direction against the reanalysis direction ----------
+
+def _days(n=120, seed=2, turn=0.0, speed=7.0):
+    """Invented days: the reference blows from about 100 degrees; the mast reads `turn` degrees more."""
+    rng = np.random.default_rng(seed)
+    days = pd.date_range("2022-03-01", periods=n, freq="D")
+    ref_dir = (100.0 + rng.normal(0, 25, n)) % 360.0
+    mast = (ref_dir + turn + rng.normal(0, 8, n)) % 360.0
+    clim = {"height_m": 80.0, "direction_days": {"first": "2022-03-01", "deg": [int(round(d)) % 360 for d in mast],
+                                                 "ws": [speed] * n}}
+    power = {"properties": {"parameter": {"WS50M": {f"{d:%Y%m%d}": 6.0 for d in days},
+                                          "WD50M": {f"{d:%Y%m%d}": float(r) for d, r in zip(days, ref_dir)}}}}
+    return clim, power
+
+
+def test_vane_check_reports_the_difference_and_cautions_when_it_is_large(tmp_path):
+    f = tmp_path / "daily.json"
+    clim, power = _days(turn=12.0)
+    f.write_text(json.dumps(power))
+    v = lt.vane_check(clim, f)
+    assert v["days"] == 120 and v["median_deg"] == pytest.approx(12.0, abs=3.0) and not v["caution"]
+    assert v["q25_deg"] < v["median_deg"] < v["q75_deg"]
+    # a north mark read the wrong way round: differences sit at +/-180 and must not average out to nothing
+    clim, power = _days(turn=178.0)
+    f.write_text(json.dumps(power))
+    v = lt.vane_check(clim, f)
+    assert abs(abs(v["median_deg"]) - 178.0) < 4.0
+    assert "80 m runs" in v["caution"] and "north mark read the wrong way round" in v["caution"] and "120 days" in v["caution"]
+    # the vane correction entered in the project is applied before comparing, and named
+    back = lt.vane_check(clim, f, offset=-170.0)
+    assert back["median_deg"] == pytest.approx(8.0, abs=3.0) and not back["caution"] and back["offset_applied_deg"] == -170.0
+    clim, power = _days(turn=-70.0)
+    f.write_text(json.dumps(power))
+    v = lt.vane_check(clim, f, offset=10.0)
+    assert v["median_deg"] == pytest.approx(-60.0, abs=3.0) and "wrong way round" not in v["caution"]
+    assert "after the vane correction of +10 degrees" in v["caution"]
+
+
+def test_vane_check_says_nothing_without_enough_to_go_on(tmp_path):
+    f = tmp_path / "daily.json"
+    clim, power = _days(n=15, turn=150.0)                      # too few days
+    f.write_text(json.dumps(power))
+    assert lt.vane_check(clim, f) is None
+    clim, power = _days(turn=150.0, speed=3.0)                  # light winds only
+    f.write_text(json.dumps(power))
+    assert lt.vane_check(clim, f) is None
+    clim, power = _days(turn=150.0)
+    assert lt.vane_check(clim, tmp_path / "missing.json") is None
+    f.write_text(json.dumps(power))
+    assert lt.vane_check({"height_m": 80.0}, f) is None         # a mast with no vane
+    del power["properties"]["parameter"]["WD50M"]               # a reference file with speeds only
+    f.write_text(json.dumps(power))
+    assert lt.vane_check(clim, f) is None
+    # directions all over the place: no caution, whatever the middle value
+    rng = np.random.default_rng(1)
+    clim, power = _days(turn=0.0)
+    clim["direction_days"]["deg"] = [int(x) for x in rng.uniform(0, 360, 120)]
+    f.write_text(json.dumps({"properties": {"parameter": {"WS50M": {f"{d:%Y%m%d}": 6.0 for d in pd.date_range("2022-03-01", periods=120)},
+                                                         "WD50M": {f"{d:%Y%m%d}": 100.0 for d in pd.date_range("2022-03-01", periods=120)}}}}))
+    v = lt.vane_check(clim, f)
+    assert v["spread_deg"] > 90 and not v["caution"]
+
+
+def test_the_measured_days_are_asked_for_with_their_direction(tmp_path, monkeypatch):
+    asked = []
+
+    class Reply:
+        def __init__(self, url):
+            self.url = url
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return json.dumps({"properties": {"parameter": {"WS50M": {"20220301": 6.0}, "WD50M": {"20220301": 100.0}}}}).encode()
+
+    def fake(req, timeout=0):
+        asked.append(req.full_url)
+        if "start=20220301" in req.full_url and fail["measured"]:
+            raise OSError("no route")
+        return Reply(req.full_url)
+
+    fail = {"measured": False}
+    monkeypatch.setattr(lt.urllib.request, "urlopen", fake)
+    out = lt.fetch_power(-1.0, 36.0, tmp_path, period=("2022-03-01", "2022-06-28"))
+    assert set(out) == {"monthly", "daily", "measured"} and Path(out["measured"]).name == "power_daily_measured.json"
+    measured = next(u for u in asked if "start=20220301" in u)
+    assert "parameters=WS50M,WD50M" in measured and "end=20220628" in measured and "/daily/" in measured
+    assert all("WD50M" not in u for u in asked if u != measured)
+    # the check is an extra: the correction goes ahead when its download fails
+    fail["measured"] = True
+    out = lt.fetch_power(-1.0, 36.0, tmp_path / "b", period=("2022-03-01", "2022-06-28"))
+    assert set(out) == {"monthly", "daily"}
+    assert set(lt.fetch_power(-1.0, 36.0, tmp_path / "c")) == {"monthly", "daily"}

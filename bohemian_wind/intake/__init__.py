@@ -2,7 +2,8 @@
 return one summary whatever the format.
 
 Formats: NRG SymphoniePRO (RLD files, converted with NRG's free SymPRO Desktop on Windows, or its TXT exports),
-Campbell Scientific TOA5 (.dat) and SecondWind Nomad2 Multi-Track exports.
+Campbell Scientific TOA5 (.dat), SecondWind Nomad2 Multi-Track exports, NRG Symphonie text exports (written by
+Symphonie Data Retriever from .RWD files) and WindPRO time series exports.
 """
 from __future__ import annotations
 
@@ -16,8 +17,12 @@ from pathlib import Path
 from .. import DISCLAIMER, __version__
 from .. import climate as _climate
 
-FORMATS = {"sympro": "NRG SymphoniePRO", "toa5": "Campbell Scientific TOA5", "nomad2": "SecondWind Nomad2 export"}
-DATA_SUFFIXES = (".rld", ".txt", ".dat", ".csv", ".rar")
+FORMATS = {"sympro": "NRG SymphoniePRO", "toa5": "Campbell Scientific TOA5", "nomad2": "SecondWind Nomad2 export",
+           "sdr": "NRG Symphonie text export", "windpro": "WindPRO time series export"}
+FILE_LISTED = ("nomad2", "sdr", "windpro")       # formats read from the files found, not from the folder as a whole
+ACCEPTED = ("NRG SymphoniePRO (.rld or exported .txt), Campbell Scientific TOA5 (.dat), a SecondWind Nomad2 export, "
+            "NRG Symphonie text exports (.txt from Symphonie Data Retriever) or a WindPRO time series export")
+DATA_SUFFIXES = (".rld", ".txt", ".dat", ".csv", ".rar", ".rwd")
 SCAN_LIMIT = 20000
 
 
@@ -34,9 +39,9 @@ def _is_toa5(path: Path) -> bool:
 
 
 def detect(path) -> dict:
-    """What a folder (or a single file) holds. Returns format (a FORMATS key or None), counts and, for Nomad2,
-    the files to read."""
-    from ..loggers import nomad2  # noqa: PLC0415
+    """What a folder (or a single file) holds. Returns format (a FORMATS key or None), counts, the files to read
+    for the formats that are read file by file, and 'mixed': the formats found when there is more than one."""
+    from ..loggers import nomad2, nrg_sdr, windpro  # noqa: PLC0415
     from ..sympro import looks_like_export  # noqa: PLC0415
     p = Path(path)
     if not p.exists():
@@ -48,8 +53,8 @@ def detect(path) -> dict:
             files += [Path(dirpath) / n for n in names if n.lower().endswith(DATA_SUFFIXES)]
             if len(files) > SCAN_LIMIT:
                 break
-    counts = {"rld": 0, "sympro_txt": 0, "toa5": 0, "nomad2": 0, "rar": 0}
-    nomad_files = []
+    counts = {"rld": 0, "sympro_txt": 0, "toa5": 0, "nomad2": 0, "sdr": 0, "windpro": 0, "rar": 0, "rwd": 0}
+    listed = {k: [] for k in FILE_LISTED}
     unread = {}                                # files with a data-like name that no reader recognised, by suffix
     probed = 0
     for f in files:
@@ -58,6 +63,8 @@ def detect(path) -> dict:
             counts["rld"] += 1
         elif suf == ".rar":
             counts["rar"] += 1
+        elif suf == ".rwd":                    # NRG Symphonie raw files: only Symphonie Data Retriever opens them
+            counts["rwd"] += 1
         elif suf == ".dat" and _is_toa5(f):
             counts["toa5"] += 1
         elif probed < 400:                     # text exports are told apart by their first lines; cap the probing
@@ -67,7 +74,13 @@ def detect(path) -> dict:
                     counts["sympro_txt"] += 1
                 elif nomad2.looks_like_nomad2(f):
                     counts["nomad2"] += 1
-                    nomad_files.append(f)
+                    listed["nomad2"].append(f)
+                elif nrg_sdr.looks_like_sdr(f):
+                    counts["sdr"] += 1
+                    listed["sdr"].append(f)
+                elif windpro.looks_like_windpro(f):
+                    counts["windpro"] += 1
+                    listed["windpro"].append(f)
                 else:
                     unread[suf] = unread.get(suf, 0) + 1
             except Exception:  # noqa: BLE001, S112  (an unreadable file is simply not counted)
@@ -79,14 +92,25 @@ def detect(path) -> dict:
         fmt = "toa5"
     elif counts["nomad2"]:
         fmt = "nomad2"
+    elif counts["sdr"]:
+        fmt = "sdr"
+    elif counts["windpro"]:
+        fmt = "windpro"
     parts = [f"{counts['rld']:,} RLD" if counts["rld"] else "", f"{counts['sympro_txt']:,} SymphoniePRO TXT" if counts["sympro_txt"] else "",
              f"{counts['toa5']:,} TOA5 .dat" if counts["toa5"] else "", f"{counts['nomad2']:,} Nomad2 export" if counts["nomad2"] else "",
-             f"{counts['rar']:,} RAR archive" if counts["rar"] else ""]
+             f"{counts['sdr']:,} NRG Symphonie text export" if counts["sdr"] else "",
+             f"{counts['windpro']:,} WindPRO export" if counts["windpro"] else "",
+             f"{counts['rar']:,} RAR archive" if counts["rar"] else "",
+             f"{counts['rwd']:,} NRG Symphonie raw .RWD (not read)" if counts["rwd"] else ""]
     found = ", ".join(x for x in parts if x)
     if not found and unread:
         found = ("files in a format this version does not read ("
                  + ", ".join(f"{n:,} {suf}" for suf, n in sorted(unread.items(), key=lambda kv: -kv[1])) + ")")
-    return {"format": fmt, "label": FORMATS.get(fmt, "not recognised"), "counts": counts, "nomad2_files": nomad_files,
+    families = [name for name, n in (("NRG SymphoniePRO", counts["rld"] + counts["sympro_txt"]),
+                                     ("Campbell Scientific TOA5", counts["toa5"]), ("Nomad2 export", counts["nomad2"]),
+                                     ("NRG Symphonie text export", counts["sdr"]), ("WindPRO export", counts["windpro"])) if n]
+    return {"format": fmt, "label": FORMATS.get(fmt, "not recognised"), "counts": counts, "nomad2_files": listed["nomad2"],
+            "read_files": listed.get(fmt, []), "mixed": families if len(families) > 1 else [],
             "found": found or "no data files at all", "files": len(files), "unread": unread}
 
 
@@ -119,13 +143,18 @@ def _plain(text: str) -> str:
 def run_checks(path, out_root, site_name: str | None = None, settings_path=None, log=print,
                sympro_path=None, password: str = "", channels: dict | None = None) -> dict:
     """Run step 1 on a data folder. Outputs go to <out_root>/runs/<name>_<time>/. Returns summarise(run folder).
-    channels: sensor heights and vane offsets by logger port, for formats whose files do not carry them (Nomad2)."""
+    channels: sensor heights and vane offsets by logger port or channel, for formats whose files do not carry them
+    or carry them wrongly (Nomad2 ports such as A4, NRG Symphonie channels such as CH7)."""
     det = detect(path)
     if det["format"] is None:
-        raise IntakeError(
-            "No logger files were recognised here. This folder should hold one mast's files: NRG SymphoniePRO "
-            "(.rld or exported .txt), Campbell Scientific TOA5 (.dat) or a SecondWind Nomad2 export. "
-            f"Found: {det['found']}.")
+        raw_only = (" The .RWD files are a Symphonie logger's raw files: convert them to text with NRG's free "
+                    "Symphonie Data Retriever (Windows), then choose the folder with the .txt files."
+                    if det["counts"]["rwd"] else "")
+        raise IntakeError(f"No logger files were recognised here. This folder should hold one mast's files: {ACCEPTED}. "
+                          f"Found: {det['found']}.{raw_only}")
+    if det["mixed"]:
+        raise IntakeError("This folder holds files of more than one kind (" + det["found"] + "). Choose the folder, or "
+                          "the file, of one mast in one format.")
     log(f"Logger format: {det['label']} ({det['found']}).")
     out_root = Path(out_root)
     if det["format"] == "sympro":
@@ -144,7 +173,10 @@ def run_checks(path, out_root, site_name: str | None = None, settings_path=None,
         (run_dir / "findings.txt").write_text("\n".join(f"{i + 1}. {t}" for i, t in enumerate(found)) + "\n", encoding="utf-8")
     else:
         from ..loggers import toa5_mast  # noqa: PLC0415
-        args = [str(f) for f in det["nomad2_files"]] if det["format"] == "nomad2" else [str(path)]
+        args = [str(f) for f in det["read_files"]] if det["format"] in FILE_LISTED else [str(path)]
+        if det["counts"]["rwd"] and det["format"] == "sdr":
+            log(f"  {det['counts']['rwd']:,} raw .RWD files were not read: only NRG's Symphonie Data Retriever opens them. "
+                "Export them to text there to add their period.")
         args += ["--out", str(out_root)]
         if site_name:
             args += ["--name", site_name]

@@ -6,7 +6,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -356,3 +356,45 @@ def test_vane_correction_turns_the_wind_and_sensor_settings_reach_the_reader(pro
     assert p.s["data"]["channels"] == {}
     with pytest.raises(ProjectError):
         p.update("data", {"channels": {"A4": {"height_m": 999}}})
+
+
+def test_the_vane_is_checked_against_the_reanalysis_when_the_reference_is_downloaded(tmp_path, monkeypatch):
+    from bohemian_wind import longterm
+    p = demo.create(tmp_path / "Demo Ridge", today=TODAY)
+    p.run("data", log=quiet)
+    clim = p.climate()
+    dd = clim["direction_days"]
+    days = [date.fromisoformat(dd["first"]) + timedelta(days=i) for i in range(len(dd["deg"]))]
+    # an invented reanalysis that blows 170 degrees away from what the mast's vane reads
+    measured = tmp_path / "measured.json"
+    measured.write_text(json.dumps({"properties": {"parameter": {
+        "WS50M": {f"{d:%Y%m%d}": 6.0 for d in days},
+        "WD50M": {f"{d:%Y%m%d}": float((v - 170) % 360) if v is not None else -999.0 for d, v in zip(days, dd["deg"])}}}}))
+    asked = {}
+
+    def fake_fetch(lat, lon, dest, period=None, **kw):
+        asked["period"] = period
+        return {"monthly": str(p.folder / "longterm" / "demo_reference_monthly.json"),
+                "daily": str(p.folder / "longterm" / "demo_reference_daily.json"), "measured": str(measured)}
+
+    monkeypatch.setattr(longterm, "fetch_power", fake_fetch)
+    p.update("longterm", {"source": "power"})
+    lines = []
+    res = p.run("longterm", log=lines.append)
+    assert asked["period"] == (dd["first"], f"{days[-1]:%Y-%m-%d}")
+    v = res["vane_check"]
+    assert abs(abs(v["median_deg"]) - 170) < 3 and v["days"] >= 20
+    assert any("north mark read the wrong way round" in c for c in res["cautions"])
+    assert any("north mark read the wrong way round" in w for w in p.warnings(clim))      # it reaches the map and the layout
+    assert any(ln.startswith("Vane north check: the direction at") for ln in lines)
+    # the vane correction entered in the project is part of what is checked; until step 2 runs again, the old
+    # verdict is not passed off as a verdict on the new correction
+    p.update("data", {"direction_offset_deg": -170})
+    stale = p.warnings(clim)
+    assert not any("wrong way round" in w for w in stale) and any("run step 2 again" in w for w in stale)
+    res = p.run("longterm", log=quiet)
+    assert p.warnings(clim) == []
+    assert abs(res["vane_check"]["median_deg"]) < 3 and not res["vane_check"]["caution"] and not res["cautions"]
+    # reference files of one's own: no directions to compare, no check
+    p.update("longterm", {"source": "file"})
+    assert p.run("longterm", log=quiet)["vane_check"] is None

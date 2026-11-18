@@ -169,3 +169,22 @@ def test_an_even_record_needs_no_seasonal_scaling_and_a_part_year_is_taken_as_it
     part = cl.from_analysis(*seasonal_analysis("2019-03-01", "2019-07-31 23:50"))
     s = cl.speed_scale(part)
     assert s["scale"] == 1.0 and "less than a full year" in s["basis"] and part["calendar_months"] == 5
+
+
+def test_daily_directions_are_handed_on_for_the_vane_check():
+    an, tq = fake_analysis(n=144 * 20)
+    hs = an["heights"]
+    wd = hs[80.0]["wd"].copy()
+    wd.iloc[144 * 3:144 * 4 - 100] = np.nan                    # the fourth day keeps only 100 of its 144 records
+    hs[80.0]["wd"] = wd
+    c = cl.from_analysis(an, tq)
+    dd = c["direction_days"]
+    assert dd["first"] == "2023-01-01" and len(dd["deg"]) == len(dd["ws"]) == 20
+    assert dd["deg"][3] is None and dd["ws"][3] is None         # under five sixths of the day: not a day to compare
+    east = [d for i, d in enumerate(dd["deg"]) if i != 3]
+    assert all(60 <= d <= 120 for d in east)                    # 70 % of the wind from 90 degrees, and the stronger
+    assert all(isinstance(d, int) for d in east) and all(3.0 < w < 12.0 for i, w in enumerate(dd["ws"]) if i != 3)
+    # a mast with no vane hands on nothing
+    hs[80.0]["wd"] = None
+    hs[60.0]["wd"] = None
+    assert cl.from_analysis(an, tq)["direction_days"] is None

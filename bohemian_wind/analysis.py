@@ -195,12 +195,26 @@ def momm(ws: pd.Series) -> tuple[float, int]:
     return (float(by_cal.mean()) if len(by_cal) == 12 else np.nan), int(len(by_cal))
 
 
-def shear(hs: dict, min_ws=3.0, wd: pd.Series | None = None) -> dict:
+def shear(hs: dict, min_ws=3.0, wd: pd.Series | None = None, min_n=100) -> dict:
+    """The profile over the records in which every height is valid and at least min_ws. Heights that were never
+    measured together (a cup moved to a new height, a sensor fitted after another came down) have no such
+    records: the height whose absence leaves the others the most records in common is then left out, one at a
+    time, and named in "left_out". Nothing measured together: no shear ({})."""
     heights = sorted(hs)
     if len(heights) < 2:
         return {}
     frame = pd.DataFrame({h: hs[h]["ws"] for h in heights})
-    m = frame.notna().all(axis=1) & (frame >= min_ws).all(axis=1)
+    ok = frame.notna() & (frame >= min_ws)
+    common = lambda hh: int(ok[hh].all(axis=1).sum())  # noqa: E731
+    left_out = []
+    while len(heights) > 2 and common(heights) < min_n:
+        drop = max(heights, key=lambda h: (common([x for x in heights if x != h]), -h))
+        heights.remove(drop)
+        left_out.append(drop)
+    m = ok[heights].all(axis=1)
+    if not m.any():
+        return {}
+    frame = frame[heights]
     means = frame[m].mean()
     alpha_fit = float(np.polyfit(np.log(heights), np.log(means.to_numpy()), 1)[0])
     lo, hi = heights[0], heights[-1]
@@ -209,7 +223,7 @@ def shear(hs: dict, min_ws=3.0, wd: pd.Series | None = None) -> dict:
     by_hour = sub.groupby(sub.index.hour).apply(pair_alpha)
     res = {"heights": heights, "means": means, "alpha_fit": alpha_fit,
            "alpha_top_bottom": float(pair_alpha(sub)), "n": int(m.sum()), "by_hour": by_hour,
-           "lo": lo, "hi": hi}
+           "lo": lo, "hi": hi, "left_out": sorted(left_out)}
     if len(heights) > 2:  # the two highest heights: the closest analogue to carrying the wind above the mast
         h2 = heights[-2]
         res["top_pair"] = (h2, hi)

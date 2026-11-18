@@ -51,6 +51,26 @@ def extrapolation_shear(sh: dict) -> tuple:
     return float(sh["alpha_top_bottom"]), f"{lo:g}-{hi:g} m pair, heights close together"
 
 
+def direction_days(ws: pd.Series, wd: pd.Series | None, interval_s: float = 600.0) -> dict | None:
+    """Day by day, the vector-mean wind direction and the mean speed, for days holding at least 5/6 of their
+    records: {"first": "YYYY-MM-DD", "deg": [...], "ws": [...]}, one entry per day from the first, None where a
+    day is too thin. The long-term step sets these against the reanalysis direction to check the vane's north."""
+    if wd is None:
+        return None
+    m = ws.notna() & wd.notna()
+    if not m.any():
+        return None
+    need = int(round(86400.0 / interval_s * 5.0 / 6.0))
+    rad = np.radians(wd[m])
+    u, v = (ws[m] * np.sin(rad)).resample("D").mean(), (ws[m] * np.cos(rad)).resample("D").mean()
+    n, speed = ws[m].resample("D").count(), ws[m].resample("D").mean()
+    deg = np.degrees(np.arctan2(u, v)) % 360.0
+    good = (n >= need) & deg.notna()
+    return {"first": f"{deg.index[0]:%Y-%m-%d}",
+            "deg": [int(round(float(d))) % 360 if g else None for d, g in zip(deg, good)],
+            "ws": [round(float(x), 1) if g else None for x, g in zip(speed, good)]}
+
+
 def from_analysis(an: dict, time_qc: dict, site: dict | None = None, source_format: str = "",
                   n_sectors: int = 12) -> dict:
     """an: result of analysis.analyse; time_qc: qc["time"]; site: name, lat, lon, elevation_m (any may be missing)."""
@@ -87,6 +107,10 @@ def from_analysis(an: dict, time_qc: dict, site: dict | None = None, source_form
                             "mean": float(x.mean()) if n else None, "records": n})
     sh = an.get("shear") or {}
     alpha, basis = extrapolation_shear(sh)
+    if alpha is None and len(hs) > 1:
+        basis = "the heights were not measured at the same time: no shear measured"
+    elif sh.get("left_out"):
+        basis += "; not in the profile, never measured together with the rest: " + ", ".join(f"{h:g} m" for h in sh["left_out"])
     odd = []
     fit = _num(sh.get("alpha_fit")) if len(sh.get("heights") or []) > 2 else None
     if alpha is not None and not SHEAR_RANGE[0] <= alpha <= SHEAR_RANGE[1]:
@@ -125,7 +149,7 @@ def from_analysis(an: dict, time_qc: dict, site: dict | None = None, source_form
                   "warning": shear_warning},
         "ti": {"mean_above_3": _num(ti.mean()) if len(ti) else None, "representative_15": rep15},
         "density": {"mean": _num(dens.get("mean")), "sensor_height_m": _num(dens.get("sensor_height"))},
-        "monthly": monthly, "heights": heights,
+        "monthly": monthly, "heights": heights, "direction_days": direction_days(ws, wd, interval),
         "period": [str(time_qc.get("start")), str(time_qc.get("end"))],
         "records": int(v.size), "recovery_pct": round(100.0 * v.size / expected, 2),
         "site": {"name": site.get("name") or "", "lat": _num(site.get("lat")), "lon": _num(site.get("lon")),

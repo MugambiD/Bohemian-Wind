@@ -256,7 +256,7 @@
   // ---------- inputs per step ----------
   const INPUTS = {
     data() {
-      return card('What to check', fText('data', 'folder', 'Folder with the logger files', { pick: 'folder', help: 'One mast per folder. NRG SymphoniePRO (.rld or .txt), Campbell TOA5 (.dat) or a Nomad2 export.' })
+      return card('What to check', fText('data', 'folder', 'Folder with the logger files', { pick: 'folder', help: 'One mast per folder. NRG SymphoniePRO (.rld or .txt), NRG Symphonie text exports (.txt from Symphonie Data Retriever), Campbell TOA5 (.dat), a Nomad2 export or a WindPRO time series export.' })
         + fText('name', 'name', 'Name on the report')
         + `<details class="more"${ok(S.project.site.lat) || ok(S.project.site.elevation_m) || Number(S.project.data.direction_offset_deg) || ok(S.project.data.shear_alpha) ? ' open' : ''}><summary>Mast position, elevation, vane and shear</summary>
            <div class="row2">${fNum('site', 'lat', 'Latitude', { placeholder: 'from the logger' })}${fNum('site', 'lon', 'Longitude', { placeholder: 'from the logger' })}</div>
@@ -321,11 +321,11 @@
   function channelsEditor() {
     const ch = S.project.data.channels || {};
     const rows = Object.entries(ch).map(([port, v]) => [port, v.height_m, v.direction_offset_deg]).concat([['', '', '']]);
-    return `<details class="more"${Object.keys(ch).length ? ' open' : ''}><summary>Sensor heights the files do not give</summary>
-      ${rows.map((r, i) => `<div class="row3 chrow"><div class="field"><label for="ch-p${i}">Port</label><input id="ch-p${i}" type="text" data-ch="port" value="${esc(r[0])}" placeholder="A4" autocomplete="off"></div>
+    return `<details class="more"${Object.keys(ch).length ? ' open' : ''}><summary>Sensor heights and vane offsets, sensor by sensor</summary>
+      ${rows.map((r, i) => `<div class="row3 chrow"><div class="field"><label for="ch-p${i}">Port or channel</label><input id="ch-p${i}" type="text" data-ch="port" value="${esc(r[0])}" placeholder="A4 or CH7" autocomplete="off"></div>
         <div class="field"><label for="ch-h${i}">Height, m</label><input id="ch-h${i}" type="number" step="any" min="0" data-ch="height" value="${ok(r[1]) ? r[1] : ''}"></div>
         <div class="field"><label for="ch-o${i}">Vane offset, °</label><input id="ch-o${i}" type="number" step="any" data-ch="offset" value="${ok(r[2]) ? r[2] : ''}"></div></div>`).join('')}
-      <p class="hint">Only for loggers whose files carry no sensor heights (SecondWind Nomad2). The port is its name in the file, for example A4. Empty the port to take a sensor out.</p></details>`;
+      <p class="hint">For files that carry no sensor heights (SecondWind Nomad2), and to put right a height or a vane's north offset that the files give wrongly or not at all (NRG Symphonie text exports, WindPRO exports). Name the sensor as the file does: a port such as A4, a channel such as CH7, or V1 and D1 for a WindPRO export. Empty the name to take a line out.</p></details>`;
   }
 
   function runCard(key, st) {
@@ -389,7 +389,8 @@
         ${card('Mast and reference, month by month', lineChart(rows, [{ name: `Mast, ${num(r.height_m, 0)} m`, colour: 'var(--series-1)' }, { name: 'Reference, 50 m', colour: 'var(--series-2)' }], 'Monthly mean wind speed, m/s')
           + `<details class="more"><summary>Show the numbers</summary>${table(['Month', 'Mast, m/s', 'Reference, m/s'], r.monthly.map(m => [monthName(m.month), num(m.mast, 2), num(m.reference, 2)]), [1, 2])}</details>`)}
         ${card('How the factor was made', list([`Method: ${r.method}.`, `Reference over the measured months ${num(r.reference_concurrent, 2)} m/s; over ${r.lt_years[0]} to ${r.lt_years[1]} ${num(r.reference_long_term, 2)} m/s.`,
-          'One reference and one monthly method. A second reference and a daily or hourly method would test it.'].concat(left.length ? [`Reference months left out because they break the usual mast-to-reference ratio: ${left.join(', ')}.`] : []))
+          'One reference and one monthly method. A second reference and a daily or hourly method would test it.'].concat(left.length ? [`Reference months left out because they break the usual mast-to-reference ratio: ${left.join(', ')}.`] : [])
+          .concat(r.vane_check ? [`Vane north check: the wind direction at ${num(r.vane_check.height_m, 0)} m runs ${r.vane_check.median_deg > 0 ? '+' : ''}${num(r.vane_check.median_deg, 0)}° from the reanalysis direction on ${r.vane_check.days} days with ${num(r.vane_check.min_ws, 0)} m/s or more (the middle half of the days: ${num(r.vane_check.q25_deg, 0)}° to ${num(r.vane_check.q75_deg, 0)}°). Terrain turns the wind, so some tens of degrees are normal.`] : []))
           + `<p class="hint">${esc(r.credit || '')}</p>`)}`;
     },
     map(r, st) {

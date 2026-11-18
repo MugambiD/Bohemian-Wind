@@ -20,7 +20,7 @@ from __future__ import annotations
 import csv
 import json
 import shutil
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -296,8 +296,14 @@ class Project:
         if clim.get("no_direction"):
             out.append("No wind direction was measured: every direction is given the same wind, so the wind map and the "
                        "wake losses are rough.")
-        out += list((self.result("longterm") or {}).get("cautions") or [])      # a part-year or a thin month reaches the energy too
-        return out
+        lt = self.result("longterm") or {}
+        cautions = list(lt.get("cautions") or [])            # a part-year, a thin month or a doubtful vane reaches the energy too
+        v = lt.get("vane_check")
+        if v and float(v.get("offset_applied_deg") or 0.0) != self.vane_offset()[0]:
+            cautions = [c for c in cautions if c != v.get("caution")]
+            cautions.append("The vane correction was changed after the vane north check of step 2 (long-term correction): "
+                            "run step 2 again to check the wind direction with the new correction.")
+        return out + cautions
 
     def turbine(self):
         from .energy.turbine import PRESETS, Turbine  # noqa: PLC0415
@@ -420,8 +426,13 @@ class Project:
         else:
             site = self.site()
             log(f"Downloading the reference from NASA POWER for {site['lat']:.4f}, {site['lon']:.4f} ...")
+            dd = clim.get("direction_days")      # the days measured: their reanalysis directions check the vane
+            period = None
+            if dd and dd.get("deg"):
+                first = date.fromisoformat(dd["first"])
+                period = (dd["first"], (first + timedelta(days=len(dd["deg"]) - 1)).isoformat())
             try:
-                files = longterm.fetch_power(site["lat"], site["lon"], self.path("longterm", "x").parent)
+                files = longterm.fetch_power(site["lat"], site["lon"], self.path("longterm", "x").parent, period=period)
             except longterm.ReferenceError_ as e:
                 raise ProjectError(str(e)) from e
         try:
@@ -431,9 +442,16 @@ class Project:
             raise ProjectError(f"The long-term correction could not be made: {e}") from e
         res["reference_first"], res["reference_last"] = str(ref.index[0]), str(ref.index[-1])
         res["measured_height_m"] = clim["height_m"]
+        res["vane_check"] = longterm.vane_check(clim, files.get("measured"), self.vane_offset()[0])
+        if res["vane_check"] and res["vane_check"]["caution"]:
+            res["cautions"].append(res["vane_check"]["caution"])
         self.path("longterm", "longterm.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
         log(f"Long-term factor {res['factor']:.3f}: {res['measured']:.2f} m/s measured becomes {res['long_term']:.2f} m/s "
             f"at {clim['height_m']:g} m (monthly correlation r = {res['r']:.2f}, {res['months']} months).")
+        if res["vane_check"]:
+            v = res["vane_check"]
+            log(f"Vane north check: the direction at {v['height_m']:g} m runs {v['median_deg']:+.0f} degrees from the "
+                f"reanalysis on {v['days']} days with {v['min_ws']:g} m/s or more.")
         for c in res["cautions"]:
             log("  " + c)
         return self._store("longterm", res)

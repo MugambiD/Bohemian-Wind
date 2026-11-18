@@ -8,13 +8,17 @@ Every method here is a developer's screening method. The limits are part of the 
 
 **Does.** Recognises the logger format, merges overlapping files, and flags records as missing, conflicting, maintenance, no signal, out of range, inconsistent, stuck or spike. Flagged records are left out. Then: recovery by sensor and month, mean wind speed by height, shear, turbulence intensity, Weibull fit, wind rose, air density.
 
-**Formats.** NRG SymphoniePRO (`.rld`, converted with NRG's free SymPRO Desktop on Windows, or its `.txt` exports), Campbell Scientific TOA5 (`.dat`), SecondWind Nomad2 Multi-Track exports.
+**Formats.** NRG SymphoniePRO (`.rld`, converted with NRG's free SymPRO Desktop on Windows, or its `.txt` exports), NRG Symphonie text exports (the `.txt` files Symphonie Data Retriever writes from `.RWD` files), Campbell Scientific TOA5 (`.dat`), SecondWind Nomad2 Multi-Track exports, and WindPRO time series exports. Text exports that went through a spreadsheet on the way (decimal commas, the date and the time in separate cells, empty columns closed up) are read as well, and the run says so. Raw `.RWD` files are not read: convert them with NRG's free Symphonie Data Retriever first. A folder holds one mast in one format; a mix is refused.
+
+**Sensors that keep dropping out.** A cup or vane that is dead or fixed for more than half of the records it logged, and never clear of an outage for 60 days in a row, is left out of the statistics altogether, the readings between the outages included. A sensor that died once after months of good data keeps those months.
+
+**A sensor the files give two heights.** Its readings are set against a cup that stayed put. A step that fits the shear between the two heights is a move, and each spell is analysed at its own height. No step means the sensor stayed where it was and only its label changed: the earlier spell is left out until the height is entered for the whole record. Heights that were never measured at the same time cannot share a profile; the shear leaves out the one that fits least and names it.
 
 **Hands on.** A `climate.json` in the run folder: 12 direction sectors with frequency and Weibull A and k at the top height, shear exponent, turbulence, density and monthly means.
 
 **Shear for other heights.** The exponent comes from the top height and the highest height below it that is at least 15 % lower. Two cups a few metres apart measure the same wind, and the exponent between them is mostly sensor error. An exponent outside 0 to 0.35, or more than 0.10 away from the fit over all heights, is flagged and the flag travels with the wind map, the layout and the pack. A shear exponent of your own can be entered for the project.
 
-**Settings the logger files cannot give.** Mast position and elevation; a vane correction in degrees (added to every direction from the wind map onwards); and, for loggers whose files carry no sensor heights, the height and vane offset of each port.
+**Settings the logger files cannot give.** Mast position and elevation (NRG Symphonie text exports carry both in their headers, and the logger's clock offset); a vane correction in degrees (added to every direction from the wind map onwards); and, sensor by sensor, a height or a vane's north offset where the files give none or give it wrongly. Sensors are named as the files name them: a port (A4), a channel (CH7), or V1 and D1 for a WindPRO export.
 
 **Stops at.** No calibration review, no mast-shadow correction, no icing model. A sensor that drifts slowly without failing a check is not caught.
 
@@ -25,6 +29,8 @@ Every method here is a developer's screening method. The limits are part of the 
 **A thin month.** When leaving out a month with 40 to 70 % valid data would leave a calendar month uncovered, and using it completes the twelve, it is used and named. Leaving it out would fall back on a single ratio for the whole period, which is biased when the mast-to-reference ratio changes with the season. A campaign that stays short of twelve calendar months does not use thin months.
 
 **Reference.** NASA POWER, MERRA-2 wind speed at 50 m, downloaded for the mast's position.
+
+**Vane north check.** With the download comes the reanalysis wind direction for the days measured. The mast's daily direction at the top height, after any vane correction entered, is set against it on days when both read 5 m/s or more, and the typical difference is reported. Terrain turns the wind, so some tens of degrees are normal. Beyond 45 degrees the result carries a caution into the wind map, the layout and the pack: a vane whose north offset is not what the settings say turns the whole wind rose, and with it the wake losses. The check needs the download; with reference files of your own it is skipped.
 
 **Stops at.** One reference and one method. With fewer than 12 calendar months measured the factor is marked indicative. No uncertainty is derived from the correlation; the budget in step 4 carries an assumed 3 %.
 
