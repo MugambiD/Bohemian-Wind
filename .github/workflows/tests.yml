@@ -42,3 +42,13 @@ jobs:
       - name: The demo project runs from the command line
         working-directory: ${{ matrix.src }}
         run: python main.py demo demo-project
+      - name: The Windows start file sets itself up, runs, and starts fast the second time
+        if: runner.os == 'Windows'
+        working-directory: ${{ matrix.src }}
+        shell: cmd
+        run: |
+          call "Start Bohemian Wind.bat" demo demo-project-bat
+          if errorlevel 1 exit /b 1
+          call "Start Bohemian Wind.bat" run demo-project-bat pack
+          if errorlevel 1 exit /b 1
+          if not exist "demo-project-bat\permitting" exit /b 1

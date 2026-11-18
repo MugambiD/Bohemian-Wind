@@ -7,9 +7,15 @@ title Bohemian Wind
 set "HOME_DIR=%LOCALAPPDATA%\BohemianWind"
 set "VENV=%HOME_DIR%\venv"
 
+REM Prefer a Python version the software is tested with; fall back to whatever is installed.
 set "PY="
-where py >nul 2>nul && set "PY=py -3"
-if not defined PY ( where python >nul 2>nul && set "PY=python" )
+for %%V in (3.12 3.13 3.11 3.10) do (
+  if not defined PY (
+    py -%%V -c "import sys" >nul 2>nul && set "PY=py -%%V"
+  )
+)
+if not defined PY ( py -3 -c "import sys" >nul 2>nul && set "PY=py -3" )
+if not defined PY ( python -c "import sys" >nul 2>nul && set "PY=python" )
 if not defined PY goto :nopython
 
 %PY% -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" || goto :oldpython
