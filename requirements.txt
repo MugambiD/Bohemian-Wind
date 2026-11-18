@@ -1,0 +1,11 @@
+# Bohemian Wind: everything the application needs. Python 3.10 or newer.
+numpy>=1.26
+pandas>=2.2
+matplotlib>=3.8
+openpyxl>=3.1
+scipy>=1.11
+xarray>=2024.1
+py_wake>=2.6
+h5py>=3.10
+# Optional, for the "Global Wind Atlas pattern" map method only:   pip install rasterio
+# Optional, to open RAR archives of Campbell logger files:          pip install unrar2-cffi

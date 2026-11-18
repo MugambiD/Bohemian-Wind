@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+build/
+dist/
+*.spec
+.venv/
+
+# [COMPLIANCE] Data never goes in the repository
+*.rld
+*.rwd
+*.dat
+*.csv
+*.xlsx
+*.xls
+*.rar
+*.zip
+*.kmz
+*.tif
+*.hgt
+*_meas.txt
+outputs/
+runs/
+converted/
+site settings/
+test-corpus/
+*Bohemian Wind QC outputs*/

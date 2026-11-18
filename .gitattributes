@@ -1,0 +1,6 @@
+# Windows command files keep their CRLF line endings on every route (clone or ZIP download)
+*.bat -text
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary

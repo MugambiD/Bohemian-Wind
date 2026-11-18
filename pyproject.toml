@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bohemian-wind"
+description = "From met mast data to a permitting pack: data checks, long-term correction, wind maps, layout, energy, noise and shadow flicker."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Bohemian Renewables (Africa)" }]
+requires-python = ">=3.10"
+dynamic = ["version"]
+dependencies = [
+  "numpy>=1.26", "pandas>=2.2", "matplotlib>=3.8", "openpyxl>=3.1",
+  "scipy>=1.11", "xarray>=2024.1", "py_wake>=2.6", "h5py>=3.10",
+]
+
+[project.optional-dependencies]
+atlas = ["rasterio>=1.3"]
+rar = ["unrar2-cffi"]
+test = ["pytest"]
+
+[project.scripts]
+bohemian-wind = "bohemian_wind.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/MugambiD/bohemian-wind."
+
+[tool.setuptools.dynamic]
+version = { attr = "bohemian_wind.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["bohemian_wind*"]
+
+[tool.setuptools.package-data]
+"bohemian_wind.app" = ["static/*", "static/img/*", "static/fonts/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning", "ignore::FutureWarning"]
