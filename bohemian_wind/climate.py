@@ -165,8 +165,8 @@ def speed_scale(climate: dict, longterm: dict | None = None) -> dict:
 
     The sector distributions are fitted to every valid record. A campaign that covers some seasons twice, or lost
     part of a month, leans towards those seasons, so the plain mean of its records is not the annual mean: on a
-    real record it sat several per cent below the mean of monthly means, and energy moves about three times as
-    fast as wind speed. The scale puts
+    real record it sat several per cent below the mean of monthly means, and energy moves faster than wind
+    speed. The scale puts
     the mean where the monthly figures say it is and keeps the shape of every sector: the long-term mean when there
     is a long-term correction (longterm: the result of bohemian_wind.longterm.correct), else the mean of monthly
     means when all twelve calendar months were measured, else the records as they are."""
