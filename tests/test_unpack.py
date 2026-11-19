@@ -164,7 +164,8 @@ def test_a_folder_of_archives_is_read_like_a_folder_of_files(mast, tmp_path, kin
 def test_a_rar_that_ends_in_a_zip_file_is_read_as_the_rar_it_is(mast, tmp_path):
     """WinRAR keeps a ZIP file inside an archive as it is. Given such an archive by name, the archive program of
     Windows and of every other system (libarchive) looks at its end, sees the ZIP file and lists that instead: the
-    logger files beside it would be passed over without a word. Hence the archive is sent to it as a stream."""
+    logger files beside it would be passed over without a word. Hence that program is handed a copy of the archive
+    with nothing but zeros after its end."""
     if not OPENS_RAR:
         pytest.skip("no program on this computer opens RAR archives")
     files, _ = mast
@@ -225,7 +226,7 @@ def test_the_unrar_program_is_asked_in_its_own_words(mast, tmp_path, monkeypatch
     assert asked[0] == ["C:/Program Files/WinRAR/UnRAR.exe", "lb", "-p-", str(data / "month.rar")] and r["other"] == {".rld": 1}
     cmd = asked[1]
     assert cmd[:5] == ["C:/Program Files/WinRAR/UnRAR.exe", "x", "-y", "-o+", "-p-"] and cmd[5] == str(data / "month.rar")
-    assert cmd[6:9] == ["*.dat", "*.txt", "*.csv"] and cmd[9].endswith(("/", "\\")) and Path(cmd[9]).parent == dest
+    assert cmd[6:9] == ["*.dat", "*.txt", "*.csv"] and cmd[9].endswith(("/", "\\")) and Path(cmd[9]).parent.parent == dest
 
 
 def test_an_archive_that_changes_or_goes_takes_its_unpacked_files_with_it(mast, tmp_path):
@@ -362,6 +363,9 @@ def test_archives_are_counted_not_taken_for_logger_files_and_a_new_one_is_notice
     assert det["format"] is None and det["counts"]["archives"] == 2 and det["found"] == "2 archives" and not det["unread"]
     assert unpack.kind("x.TAR.GZ") == "tar" and unpack.kind("x.RAR") == "rar" and unpack.kind("x.dat") is None
     assert unpack.stem(Path("Mast 2025.tar.gz")) == "Mast 2025"
+    for name in ("year.part1.rar", "year.part2.rar", "year.part03.rar"):          # one archive in three files: opened by its first
+        (data / name).write_bytes(b"Rar!")
+    assert [p.name for p in unpack.find(data)] == ["a.zip", "b.tar.gz", "year.part1.rar"]
     sig = intake.folder_signature(data)
     write_zip(data / "c.zip", dict(list(files.items())[:1]))
     assert intake.folder_signature(data) != sig                                    # daily intake sees a new archive arrive

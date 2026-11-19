@@ -23,7 +23,6 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-import threading
 import zipfile
 from pathlib import Path, PurePosixPath
 
@@ -40,6 +39,8 @@ MARK = ".unpacked.json"                     # in every unpacked folder: which ar
 SCAN_LIMIT = 20000
 MAX_BYTES = 8 << 30                         # logger files of one archive: more than this is not mast data
 TOOL_SECONDS = 900
+PADDING = 1 << 17                           # zeros after a RAR archive handed to the system's program (see _tar_into)
+VOLUME = re.compile(r"\.part0*(\d+)\.rar$", re.I)      # an archive in several files: month.part1.rar, month.part2.rar
 _NO_WINDOW = 0x08000000 if sys.platform.startswith("win") else 0      # no console window flashing up on Windows
 
 
@@ -58,7 +59,7 @@ def find(folder) -> list:
     out = []
     for dirpath, dirs, names in os.walk(folder):
         dirs[:] = sorted(d for d in dirs if not d.startswith(".") and d.lower() not in SKIP_DIRS)
-        out += [Path(dirpath) / n for n in sorted(names) if kind(n)]
+        out += [Path(dirpath) / n for n in sorted(names) if kind(n) and (VOLUME.search(n) is None or int(VOLUME.search(n).group(1)) == 1)]
         if len(out) > SCAN_LIMIT:
             break
     return out
@@ -106,38 +107,16 @@ def _said(cmd: list) -> str:
         return ""
 
 
-def _run(cmd: list, feed: Path | None = None) -> tuple:
-    """(exit code, what it printed, its messages) of one of the computer's programs. feed: a file sent to the
-    program as a stream, in place of a name on its command line."""
-    late = []
-    with tempfile.TemporaryFile() as printed, tempfile.TemporaryFile() as messages:
-        try:
-            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE if feed else subprocess.DEVNULL, stdout=printed,  # noqa: S603
-                                    stderr=messages, creationflags=_NO_WINDOW)
-        except OSError as e:
-            raise UnpackError(f"the program that opens it could not be started ({e.strerror or e})") from None
-        timer = threading.Timer(TOOL_SECONDS, lambda: (late.append(1), proc.kill()))
-        timer.start()
-        try:
-            if feed:
-                try:
-                    with open(feed, "rb") as fh:
-                        shutil.copyfileobj(fh, proc.stdin, 1 << 20)
-                except OSError:              # the program stopped reading: its messages say why
-                    pass
-                finally:
-                    try:
-                        proc.stdin.close()
-                    except OSError:
-                        pass
-            code = proc.wait()
-        finally:
-            timer.cancel()
-        if late:
-            raise UnpackError(f"opening it took more than {TOOL_SECONDS // 60} minutes")
-        printed.seek(0)
-        messages.seek(0)
-        return code, printed.read().decode("utf-8", "replace"), messages.read().decode("utf-8", "replace")
+def _run(cmd: list) -> tuple:
+    """(exit code, what it printed, its messages) of one of the computer's programs."""
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=TOOL_SECONDS, creationflags=_NO_WINDOW,  # noqa: S603
+                           stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        raise UnpackError(f"opening it took more than {TOOL_SECONDS // 60} minutes") from None
+    except OSError as e:
+        raise UnpackError(f"the program that opens it could not be started ({e.strerror or e})") from None
+    return r.returncode, r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace")
 
 
 def _why(text: str) -> str:
@@ -246,10 +225,18 @@ def _names(listing: str) -> list:
     return [ln.rstrip("\r") for ln in listing.splitlines() if ln.strip() and not ln.rstrip("\r").endswith(("/", "\\"))]
 
 
-def _tar_into(exe: str, archive: Path, tmp: str, other: dict, as_stream: bool) -> bool:
-    """Unpack the logger files of an archive into tmp with the system's archive program. False when it holds none."""
-    name, feed = ("-", archive) if as_stream else (str(archive), None)
-    code, listing, err = _run([exe, "-tf", name], feed)
+def _tar_into(exe: str, archive: Path, tmp: str, into: str, other: dict) -> bool:
+    """Unpack the logger files of an archive into `into` with the system's archive program. False when it holds none."""
+    name = str(archive)
+    if kind(archive) == "rar" and not VOLUME.search(archive.name):
+        # The program looks at the end of a file before its beginning, and a RAR archive that ends in a ZIP file
+        # kept unpacked inside it (WinRAR keeps them so) is then taken for that ZIP file: the archive's own files
+        # would be passed over without a word. So the program gets a copy with nothing but zeros after its end.
+        name = str(Path(tmp) / "copy.rar")
+        with open(archive, "rb") as src, open(name, "wb") as dst:
+            shutil.copyfileobj(src, dst, 1 << 20)
+            dst.write(b"\0" * PADDING)
+    code, listing, err = _run([exe, "-tf", name])
     if code != 0:
         raise UnpackError(_why(err or listing))
     names = _names(listing)
@@ -260,48 +247,28 @@ def _tar_into(exe: str, archive: Path, tmp: str, other: dict, as_stream: bool) -
     if not take:
         return False
     ends = sorted({os.path.splitext(n)[1] for n in take})          # as spelt in the archive: .dat, .DAT
-    code, said, err = _run([exe, "-xf", name, "-C", tmp, *[a for e in ends for a in ("--include", f"*{e}")]], feed)
+    code, said, err = _run([exe, "-xf", name, "-C", into, *[a for e in ends for a in ("--include", f"*{e}")]])
     if code != 0:
         raise UnpackError(_why(err or said))
     return True
 
 
-def _with_tool(archive: Path, out: Path, other: dict, tool: tuple) -> tuple:
+def _with_tool(archive: Path, out: Path, other: dict, tool: tuple) -> list:
     """Unpack with one of the computer's programs: into a folder of its own first, from which only the logger
-    files are taken. Names inside the archive never decide where a file is written. Returns (file names, a note
-    for the working log or "")."""
+    files are taken. Names inside the archive never decide where a file is written."""
     _, exe, how = tool
-    note = ""
     with tempfile.TemporaryDirectory(prefix=".opening-", dir=out.parent) as tmp:
+        into = os.path.join(tmp, "files")
+        os.mkdir(into)
         if how == "tar":
-            # A RAR archive goes to the program as a stream, not as a file name. Given the file, the program looks at
-            # its end first, and an archive that ends in a ZIP file kept unpacked inside it (WinRAR keeps them so)
-            # is then taken for that ZIP file: its own files would be passed over without a word. Only if the
-            # stream is refused is the file name given after all.
-            if kind(archive) == "rar":
-                try:
-                    _tar_into(exe, archive, tmp, other, as_stream=True)
-                except UnpackError as e:
-                    for f in Path(tmp).rglob("*"):
-                        if f.is_file():
-                            f.unlink()
-                    tally = {}
-                    try:
-                        _tar_into(exe, archive, tmp, tally, as_stream=False)
-                    except UnpackError as again:
-                        raise UnpackError(f"{e}; given the file name instead of the stream: {again}") from None
-                    other.clear()
-                    other.update(tally)
-                    note = f"{archive.name} was not taken as a stream ({e}) and was opened by its file name instead"
-            else:
-                _tar_into(exe, archive, tmp, other, as_stream=False)
+            _tar_into(exe, archive, tmp, into, other)
         elif how == "7z":
             code, listing, err = _run([exe, "l", "-slt", "-ba", "-p-", str(archive)])
             if code > 1:
                 raise UnpackError(_why(err or listing))
             blocks = [dict(ln.split(" = ", 1) for ln in b.splitlines() if " = " in ln) for b in listing.replace("\r", "").split("\n\n")]
             _tally([b["Path"] for b in blocks if b.get("Path") and b.get("Folder") != "+"], other)
-            code, said, err = _run([exe, "x", "-y", "-bd", "-ssc-", "-p-", f"-o{tmp}", str(archive), *[f"-ir!*{s}" for s in WANTED]])
+            code, said, err = _run([exe, "x", "-y", "-bd", "-ssc-", "-p-", f"-o{into}", str(archive), *[f"-ir!*{s}" for s in WANTED]])
             if code > 1:                    # 1 is a warning: the files are there
                 raise UnpackError(_why(err or said))
         else:
@@ -309,19 +276,19 @@ def _with_tool(archive: Path, out: Path, other: dict, tool: tuple) -> tuple:
             if code not in (0, 1):
                 raise UnpackError(_why(err or listing))
             _tally(_names(listing), other)
-            code, said, err = _run([exe, "x", "-y", "-o+", "-p-", str(archive), *[f"*{s}" for s in WANTED], tmp + os.sep])
+            code, said, err = _run([exe, "x", "-y", "-o+", "-p-", str(archive), *[f"*{s}" for s in WANTED], into + os.sep])
             if code not in (0, 1):
                 raise UnpackError(_why(err or said))
         files = []
-        for dirpath, dirs, names in os.walk(tmp):
+        for dirpath, dirs, names in os.walk(into):
             files += [Path(dirpath) / n for n in names if _wanted(n) and not (Path(dirpath) / n).is_symlink()]
-        rel = {f.relative_to(tmp).as_posix(): f for f in files}
+        rel = {f.relative_to(into).as_posix(): f for f in files}
         where = _targets(sorted(rel))
         if sum(f.stat().st_size for f in files) > MAX_BYTES:
             raise UnpackError("it holds more than 8 GB of logger files, which no mast produces")
         for name, f in rel.items():
             os.replace(f, out / where[name])
-        return sorted(where.values()), note
+        return sorted(where.values())
 
 
 def _with_unrar_package(archive: Path, out: Path, other: dict) -> list:
@@ -357,10 +324,8 @@ def _open(archive: Path, out: Path, other: dict) -> tuple:
             continue
         try:
             other.clear()
-            files, note = _with_tool(archive, out, other, tool)
-            if reasons:
-                note = "; ".join(x for x in (note, f"{archive.name}: {reasons[0]}, so {tool[0]} opened it") if x)
-            return files, tool[0], note
+            files = _with_tool(archive, out, other, tool)
+            return files, tool[0], (f"{archive.name}: {reasons[0]}, so {tool[0]} opened it" if reasons else "")
         except UnpackError as e:
             reasons.append(f"{tool[0]} said: {e}")
             for f in out.iterdir():          # what a failed try left behind
@@ -477,8 +442,8 @@ def unpack(archives: list, base, dest, log=print, keep=None) -> dict:
         log(f"  {res['files']:,} logger files from {res['opened']:,} archive{'s' if res['opened'] != 1 else ''}"
             + (f" ({res['now']:,} unpacked now, with {' and '.join(res['with'])})" if res["with"] else "")
             + f". They are kept in {dest}; the archives are untouched.")
-    for note in res["notes"][:3]:
-        log(f"  Note: {note}." + (f" The same goes for {len(res['notes']) - 3:,} more." if note is res["notes"][2] and len(res["notes"]) > 3 else ""))
+    for i, note in enumerate(res["notes"][:3]):
+        log(f"  Note: {note}." + (f" The same goes for {len(res['notes']) - 3:,} more." if i == 2 and len(res["notes"]) > 3 else ""))
     for name, why in res["failed"][:5]:
         log(f"  NOT OPENED {name}: {why}.")
     if len(res["failed"]) > 5:
