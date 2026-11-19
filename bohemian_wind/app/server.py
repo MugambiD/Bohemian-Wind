@@ -82,6 +82,33 @@ class App:
         self.lock = threading.Lock()                 # one piece of work on the project at a time
         self.watch_stop: threading.Event | None = None
         self.watch_log: list = []
+        self.pages: dict = {}                        # the windows that are open: page id -> when last heard from
+        self.had_page = False
+        self.empty_since: float | None = None        # when the last window was closed
+        self.stop = threading.Event()                # set to end the application (the installed start watches it)
+
+    # ---------- windows: the installed start stops the application when the last one is closed ----------
+
+    def seen(self, page: str | None) -> None:
+        if page:
+            self.pages[str(page)[:64]] = time.time()
+            self.had_page, self.empty_since = True, None
+
+    def bye(self, page: str | None) -> dict:
+        self.pages.pop(str(page or "")[:64], None)
+        if not self.pages:
+            self.empty_since = time.time()
+        return {"ok": True}
+
+    def closed_for(self) -> float | None:
+        """Seconds since the last window was closed. None while one is open, and before the first one has loaded."""
+        if self.pages or not self.had_page or self.empty_since is None:
+            return None
+        return time.time() - self.empty_since
+
+    def quit(self) -> dict:
+        self.stop.set()
+        return {"ok": True}
 
     # ---------- recent projects ----------
 
@@ -345,6 +372,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._fail(403, "Not allowed.")
                 return
             self._file(self.app.project.folder / parts[3], self.app.project.folder)
+        elif path == "/ping":             # how a second start finds the copy that is running; it says nothing else
+            self._json({"app": "bohemian-wind", "version": __version__})
         elif path == "/api/state":
             self._api(lambda: self.app.state())
         elif path == "/api/job":
@@ -369,6 +398,13 @@ class Handler(BaseHTTPRequestHandler):
             self._fail(400, "The request could not be read.")
             return
         app = self.app
+        if urllib.parse.urlsplit(self.path).path == "/api/bye":
+            # sent by the page as its window closes, when it can set no header: the token travels in the body
+            if secrets.compare_digest(str(body.get("token") or ""), app.token):
+                self._json(app.bye(body.get("page")))
+            else:
+                self._fail(403, "Not allowed.")
+            return
         routes = {
             "/api/project": lambda: app.project_action(body),
             "/api/settings": lambda: app.change(lambda p: p.update(str(body.get("section")), body.get("values") or {})),
@@ -377,6 +413,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/watch": lambda: app.set_watch(body),
             "/api/pick": lambda: app.pick(body),
             "/api/reveal": lambda: app.reveal(body),
+            "/api/quit": lambda: app.quit(),
         }
         fn = routes.get(urllib.parse.urlsplit(self.path).path)
         if not fn:
@@ -388,6 +425,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorised():
             self._fail(403, "The page is out of date. Reload it.")
             return
+        self.app.seen(self.headers.get("X-BW-Page"))
         try:
             self._json(fn())
         except ProjectError as e:
@@ -395,6 +433,13 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:  # noqa: BLE001
             traceback.print_exc()
             self._fail(500, f"{type(e).__name__}: {e}")
+
+
+class Server(ThreadingHTTPServer):
+    daemon_threads = True
+    # On Windows "reuse address" lets a second program listen on a port that is already taken, so two copies of the
+    # application would answer on one port in turn. Switched off there, a taken port is refused and the next is tried.
+    allow_reuse_address = not sys.platform.startswith("win")
 
 
 def serve(port: int = 8765, open_browser: bool = True, project=None, quiet: bool = False):
@@ -406,13 +451,12 @@ def serve(port: int = 8765, open_browser: bool = True, project=None, quiet: bool
     for p in range(port, port + 30):
         try:
             handler = type("BoundHandler", (Handler,), {"app": app, "port": p})
-            server = ThreadingHTTPServer(("127.0.0.1", p), handler)
+            server = Server(("127.0.0.1", p), handler)
             break
         except OSError:
             continue
     if server is None:
         raise SystemExit(f"No free port between {port} and {port + 29}. Close the other copy of Bohemian Wind and start again.")
-    server.daemon_threads = True
     url = f"http://127.0.0.1:{server.server_address[1]}/"
     if not quiet:
         print(f"Bohemian Wind v{__version__} is running at {url}\n{APP_NOTICE}\nKeep this window open while you work. "

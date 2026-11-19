@@ -4,6 +4,7 @@
   'use strict';
 
   const TOKEN = document.querySelector('meta[name="bw-token"]').content;
+  const PAGE = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now();   // this window
   const $ = (s, el = document) => el.querySelector(s);
   const main = $('#main'), rail = $('#rail'), tip = $('#tip');
 
@@ -61,7 +62,7 @@
   const compass = deg => ['N', 'NNE', 'ENE', 'E', 'ESE', 'SSE', 'S', 'SSW', 'WSW', 'W', 'WNW', 'NNW'][Math.round(((deg % 360) + 360) % 360 / 30) % 12];
 
   async function api(path, body) {
-    const opt = { headers: { 'X-BW-Token': TOKEN } };
+    const opt = { headers: { 'X-BW-Token': TOKEN, 'X-BW-Page': PAGE } };
     if (body !== undefined) { opt.method = 'POST'; opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
     let r;
     try { r = await fetch(path, opt); } catch (e) { throw new Error('Bohemian Wind is not running. Start it again, then reload this page.'); }
@@ -701,6 +702,12 @@
     if (document.activeElement && ['INPUT', 'SELECT'].includes(document.activeElement.tagName)) return;
     try { S = await api('/api/state'); render(true); } catch (e) { /* the next tick tries again */ }
   }, 30000);
+
+  // Started from the Start menu, the application stops a few seconds after its last window is closed: tell it.
+  // (A reload says goodbye too, and is back before the application has stopped.)
+  window.addEventListener('pagehide', () => {
+    try { navigator.sendBeacon('/api/bye', new Blob([JSON.stringify({ token: TOKEN, page: PAGE })], { type: 'application/json' })); } catch (e) { /* nothing to tell */ }
+  });
 
   // ---------- start ----------
   (async () => {

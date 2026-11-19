@@ -294,6 +294,37 @@ def test_openstreetmap_is_asked_in_parts_and_what_arrived_is_kept(tmp_path, monk
     assert len(net2.calls) - n == 2 and len(rows) == 5 and any("2 of 4 parts arrived earlier today" in ln for ln in lines)
 
 
+def test_a_new_project_starts_with_the_server_that_answered_the_last_one(tmp_path, monkeypatch, no_waiting):
+    """Found on real projects: with the main server down, every new project waited out its silence (over a minute)
+    before trying the server that had just answered the project before."""
+    m_lon, m_lat = metres_per_degree(LAT0)
+    box = (LAT0 - 900 / m_lat, LON0 - 900 / m_lon, LAT0 + 900 / m_lat, LON0 + 900 / m_lon)            # one part
+    first, second, third = bld.OVERPASS_URLS
+    hosts = [urllib.parse.urlsplit(u).netloc for u in bld.OVERPASS_URLS]
+    net = Net()
+    monkeypatch.setattr(bld, "_open", net)
+    net.pages[first] = TimeoutError("timed out")
+    net.pages[second] = overpass_server([(0.0, 0.0)])
+    net.pages[third] = TimeoutError("timed out")
+    note = tmp_path / "cache" / "overpass_server.json"
+    rows, server = bld.fetch_osm(*box, log=lambda m: None, copy=tmp_path / "a" / bld.OSM_COPY, today=TODAY, note=note)
+    assert len(rows) == 1 and server == hosts[1] and [c[0] for c in net.calls] == [first, second]
+    assert json.loads(note.read_text("utf-8")) == {"server": hosts[1], "day": TODAY.isoformat()}
+    # another project, the same day and the day after: the server that answered is asked first
+    for day, folder in ((TODAY, "b"), (TODAY + timedelta(days=1), "c")):
+        net.calls.clear()
+        bld.fetch_osm(*box, log=lambda m: None, copy=tmp_path / folder / bld.OSM_COPY, today=day, note=note)
+        assert [c[0] for c in net.calls] == [second]
+    # a note that is older, or that cannot be read, changes nothing; nor does a go without a note
+    net.calls.clear()
+    bld.fetch_osm(*box, log=lambda m: None, copy=tmp_path / "d" / bld.OSM_COPY, today=TODAY + timedelta(days=5), note=note)
+    assert [c[0] for c in net.calls] == [first, second]
+    note.write_text("not json", encoding="utf-8")
+    net.calls.clear()
+    bld.fetch_osm(*box, log=lambda m: None, copy=tmp_path / "e" / bld.OSM_COPY, today=TODAY, note=note)
+    assert [c[0] for c in net.calls] == [first, second] and json.loads(note.read_text("utf-8"))["server"] == hosts[1]
+
+
 def test_busy_servers_are_given_time_and_silent_or_unwilling_ones_are_not(tmp_path, monkeypatch, no_waiting):
     m_lon, m_lat = metres_per_degree(LAT0)
     box = (LAT0 - 4000 / m_lat, LON0 - 4000 / m_lon, LAT0 + 4000 / m_lat, LON0 + 4000 / m_lon)       # four parts

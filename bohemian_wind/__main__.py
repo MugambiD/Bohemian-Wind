@@ -2,27 +2,37 @@
 
     python -m bohemian_wind                      open the application in the browser
     python -m bohemian_wind app --port 8765      the same, with options (--no-browser, --project FOLDER)
+    python -m bohemian_wind desktop              as an installed program: no console, one copy, its own window (--quit stops it)
     python -m bohemian_wind demo FOLDER          create the demo project in FOLDER and run every step
     python -m bohemian_wind run FOLDER [STEP..]  run steps of a project (default: all six)
     python -m bohemian_wind check FOLDER         daily intake, once: re-run step 1 if new logger files arrived
     python -m bohemian_wind watch FOLDER         daily intake, continuously (every --minutes, default 60)
-    python -m bohemian_wind qc DATA_FOLDER ...   the original data-check command (see: qc --help)
+    python -m bohemian_wind qc DATA_FOLDER ...   the data checks alone, on a folder of logger files (see: qc --help)
+    python -m bohemian_wind DATA_FOLDER ...      the same: a folder given without a command is taken as "qc"
 """
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from . import APP_NOTICE, __version__
+
+COMMANDS = ("app", "desktop", "demo", "run", "check", "watch", "qc")
 
 
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv:
         argv = ["app"]
+    if argv[0] not in COMMANDS and not argv[0].startswith("-") and os.path.exists(argv[0]):
+        argv = ["qc", *argv]                 # how the data checks were started before the application existed
     if argv[0] == "qc":
         from .cli import main as qc_main
         return qc_main(argv[1:])
+    if argv[0] == "desktop":
+        from .app.desktop import main as desktop_main
+        return desktop_main(argv[1:])
     ap = argparse.ArgumentParser(prog="bohemian-wind", description=f"Bohemian Wind v{__version__}. {APP_NOTICE}")
     sub = ap.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("app", help="open the application")

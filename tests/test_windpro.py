@@ -3,6 +3,7 @@ Every number and name in this file is invented.
 
 Run: python -m pytest tests/test_windpro.py -q
 """
+import re
 import sys
 from pathlib import Path
 
@@ -121,3 +122,21 @@ def test_runs_through_the_checks_as_a_mast_with_one_height(tmp_path):
     # the same file given by name, straight to the run
     run = toa5_mast.main([str(data / "series 45m.txt"), "--out", str(tmp_path / "out2"), "--name", "Test 45"], log=lambda m: None)
     assert (run / "climate.json").is_file() and (run / "summary.xlsx").is_file()
+
+
+def test_the_data_check_command_reads_this_format_too(tmp_path, capsys):
+    """python -m bohemian_wind qc <folder> used to read NRG SymphoniePRO folders only, and told the owner of any other
+    mast that there were 'no TXT exports to read'. It now reads every format step 1 of the application reads; a folder
+    given without the word qc is taken the same way."""
+    from bohemian_wind.__main__ import main
+    data = tmp_path / "mast"
+    data.mkdir()
+    write_export(data / "series 45m.txt", truth("2017-05-01", n=144 * 40, seed=3), "exported")
+    assert main(["qc", str(data), "-o", str(tmp_path / "out"), "--site-name", "Test 45"]) == 0
+    out = capsys.readouterr().out
+    report = Path(re.search(r"^REPORT (.+)$", out, re.M).group(1))
+    assert "Logger format: WindPRO time series export" in out and report.is_file() and report.name == "report.html"
+    assert main([str(data), "-o", str(tmp_path / "out")]) == 0                 # the folder alone, as before the application
+    assert len(list((tmp_path / "out" / "runs").glob("*/report.html"))) == 2  # each run in a folder of its own
+    assert main(["qc", str(tmp_path / "nothing here")]) == 2
+    assert "Not found" in capsys.readouterr().err

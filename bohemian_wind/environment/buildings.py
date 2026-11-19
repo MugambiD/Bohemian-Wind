@@ -369,12 +369,33 @@ def osm_parts(south: float, west: float, north: float, east: float) -> list:
             for j in range(ny) for i in range(nx)]
 
 
+def _last_server(note, today: date) -> str:
+    """The server that answered last on this computer, for any project, if that was today or yesterday."""
+    try:
+        kept = json.loads(Path(note).read_text(encoding="utf-8"))
+        return str(kept["server"]) if 0 <= (today - date.fromisoformat(kept["day"])).days <= 1 else ""
+    except (OSError, ValueError, KeyError, TypeError):
+        return ""
+
+
+def _note_server(note, host: str, today: date) -> None:
+    if note is None:
+        return
+    try:
+        Path(note).parent.mkdir(parents=True, exist_ok=True)
+        Path(note).write_text(json.dumps({"server": host, "day": today.isoformat()}), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def fetch_osm(south: float, west: float, north: float, east: float, *, log=print, timeout: float = OSM_TIMEOUT_S,
-              copy=None, today: date | None = None) -> tuple:
+              copy=None, today: date | None = None, note=None) -> tuple:
     """([(lat, lon, id)], server). The area is asked for in parts and each public server is tried in turn, the one
     that answered last first. When every server is busy the round is tried again after a wait, three times; a server
     that stays silent twice is left out for the rest of the go. With copy (a file path) the parts that arrived are
-    kept for the day, so a second go asks only for what is missing."""
+    kept for the day, so a second go asks only for what is missing. With note (a file path) the server that answered
+    is remembered between projects for a day: a new project then starts with it, and does not sit out the silence
+    of a server that is down."""
     today = today or date.today()
     box = [round(v, 6) for v in (south, west, north, east)]
     state = {"box": box, "fetched": today.isoformat(), "server": "", "parts": {}}
@@ -401,7 +422,8 @@ def fetch_osm(south: float, west: float, north: float, east: float, *, log=print
         log(f"  OpenStreetMap buildings: {len(parts) - len(todo)} of {len(parts)} parts arrived earlier today; the rest now ...")
     else:
         log(f"  OpenStreetMap buildings, in {len(parts)} parts ..." if len(parts) > 1 else "  OpenStreetMap buildings ...")
-    servers = sorted(OVERPASS_URLS, key=lambda u: urllib.parse.urlsplit(u).netloc != state["server"])
+    preferred = state["server"] or (_last_server(note, today) if note is not None else "")
+    servers = sorted(OVERPASS_URLS, key=lambda u: urllib.parse.urlsplit(u).netloc != preferred)
     silences: dict = {}
     for n, (key, b) in enumerate(todo):
         data = urllib.parse.urlencode({"data": overpass_query(*b)}).encode()
@@ -433,6 +455,7 @@ def fetch_osm(south: float, west: float, north: float, east: float, *, log=print
                     continue
                 state["parts"][key], state["server"] = parse_overpass(obj), host
                 save()
+                _note_server(note, host, today)
                 got = True
                 if len(parts) > 1:
                     log(f"    part {len(parts) - len(todo) + n + 1} of {len(parts)}: {len(state['parts'][key]):,} buildings")
@@ -576,7 +599,8 @@ def fetch(lat: float, lon: float, half_km: float, dest_dir, *, cache_dir=None, l
         sources["microsoft"] = {"ok": False, "n": 0, "error": str(e)}
         log(f"  {e}")
     try:
-        osm, server = fetch_osm(south, west, north, east, log=log, copy=Path(dest_dir) / OSM_COPY, today=today)
+        osm, server = fetch_osm(south, west, north, east, log=log, copy=Path(dest_dir) / OSM_COPY, today=today,
+                                note=Path(cache_dir or default_cache()) / "overpass_server.json")
         sources["osm"] = {"ok": True, "n": len(osm), "server": server}
         log(f"  {len(osm):,} buildings in OpenStreetMap.")
     except BuildingsError as e:
