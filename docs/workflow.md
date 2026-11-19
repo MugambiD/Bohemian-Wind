@@ -65,7 +65,7 @@ Every method here is a developer's screening method. The limits are part of the 
 
 **Noise.** ISO 9613-2 general method, A-weighted at 500 Hz, alternative ground attenuation, air absorption 1.9 dB/km, receiver 4 m above ground. Terrain sets heights and the mean path height; screening by hills and buildings is ignored.
 
-**Shadow flicker.** Astronomical worst case, every minute of a year: the sun at least 3° above the horizon, homes within 10 rotor diameters, the rotor always turning and facing the sun, nothing in between. Reported as hours a year and the longest day, with an upper bound on the operating time lost if turbines stopped whenever a home could be affected.
+**Shadow flicker.** Astronomical worst case, every minute of a year: the sun at least 3° above the horizon, homes within 10 rotor diameters, the rotor always turning and facing the sun, nothing in between. Reported as hours a year and the longest day, with an upper bound on the operating time lost if turbines stopped whenever a home could be affected. Days run from midnight in the zone of the site's longitude, which is not always the country's clock time; that changes no figure where the nights are dark. A home is over a limit when the figure shown for it is: one listed at exactly 30.0 hours is not over 30.
 
 **Many homes.** A building survey can hold tens of thousands of points. All of them are assessed and written to the two CSV files; the project and the pack keep the 500 most affected in each list, and the maps draw the rest as dots.
 

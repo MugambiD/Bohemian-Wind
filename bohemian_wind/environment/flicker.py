@@ -35,8 +35,10 @@ def at_receptors(grid: Grid, turbines: list, receptors: list, hub_m: float, roto
                  step_min: int = 1, limit_hours_year: float = 30.0, limit_min_day: float = 30.0,
                  utc_offset_h: float | None = None, days=None, min_sun_elevation: float = MIN_SUN_ELEVATION,
                  max_distance_rotors: float = MAX_DISTANCE_ROTORS, eye_height: float = EYE_HEIGHT) -> dict:
-    """turbines, receptors: dicts with x, y in local metres. utc_offset_h: local time minus UTC, for counting by
-    local day (default: from the longitude)."""
+    """turbines, receptors: dicts with x, y in local metres. utc_offset_h: where the days are split, as hours ahead
+    of UTC (default: the zone of the site's longitude, which keeps midnight in the dark; it is not the civil time of
+    the country and changes no figure unless the sun is up at that midnight). The verdicts against the two limits go
+    by the hours and minutes as shown in the tables."""
     R = rotor_m / 2.0
     lat0, lon0 = grid.lat0, grid.lon0
     off = round(lon0 / 15.0) if utc_offset_h is None else utc_offset_h
@@ -73,10 +75,10 @@ def at_receptors(grid: Grid, turbines: list, receptors: list, hub_m: float, roto
                 by_turbine[j] |= hit
                 causes.append((turbines[j].get("id", str(j + 1)), float(hit.sum() * step_min / 60.0)))
         per_day = np.bincount(day_index, weights=shaded.astype(float), minlength=len(day_ids)) * step_min
-        hours = float(shaded.sum() * step_min / 60.0)
-        worst_day = float(per_day.max()) if len(per_day) else 0.0
+        hours = round(float(shaded.sum() * step_min / 60.0), 1)           # as shown: a home listed at the limit is not over it
+        worst_day = round(float(per_day.max()), 0) if len(per_day) else 0.0
         causes.sort(key=lambda c: -c[1])
-        rows.append({"name": rc["name"], "hours_per_year": round(hours, 1), "max_minutes_per_day": round(worst_day, 0),
+        rows.append({"name": rc["name"], "hours_per_year": hours, "max_minutes_per_day": worst_day,
                      "days_with_flicker": int((per_day > 0).sum()),
                      "over_hours_limit": bool(hours > limit_hours_year), "over_day_limit": bool(worst_day > limit_min_day),
                      "over_limit": bool(hours > limit_hours_year or worst_day > limit_min_day),
@@ -98,4 +100,5 @@ def at_receptors(grid: Grid, turbines: list, receptors: list, hub_m: float, roto
             "per_turbine_hours": {turbines[j].get("id", str(j + 1)): round(float(by_turbine[j].sum() * step_min / 60.0), 1)
                                   for j in range(len(turbines))},
             "method": f"astronomical worst case; sun at least {min_sun_elevation:g} deg above the horizon; within "
-                      f"{max_distance_rotors:g} rotor diameters; eye height {eye_height:g} m; local time UTC{off:+g} h"}
+                      f"{max_distance_rotors:g} rotor diameters; eye height {eye_height:g} m; days counted from "
+                      f"midnight at UTC{off:+g} h" + ("" if utc_offset_h is not None else ", the zone of the site's longitude")}

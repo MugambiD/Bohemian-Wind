@@ -142,3 +142,27 @@ def test_homes_out_of_range_of_every_turbine_get_no_flicker_and_cost_nothing():
     assert far["hours_per_year"] == 0.0 and far["turbines"] == [] and not far["over_limit"] and far["nearest_turbine_m"] > 2500
     alone = flicker.at_receptors(g, t, homes[:1], 100.0, 120.0, 2027, step_min=10)     # the near home: the same with or without the others
     assert alone["receptors"][0] == res["receptors"][0] and alone["per_turbine_hours"] == res["per_turbine_hours"]
+
+
+def test_the_flicker_verdict_goes_by_the_figures_as_shown():
+    """One day at one-minute steps: the minutes of that day are the whole count, so the hours behind the rounded
+    figure are known. A home shown at exactly the limit is not over it."""
+    g = flat()
+    turb = [{"id": "T01", "x": 0.0, "y": 0.0}]
+    tried = []
+    for west in range(300, 800, 20):                    # find a home whose minutes round down to a tenth of an hour
+        home = [{"name": "west", "x": -float(west), "y": 0.0}]
+        row = flicker.at_receptors(g, turb, home, 100.0, 100.0, 2027, days=[78])["receptors"][0]
+        tried.append(row["max_minutes_per_day"])
+        if row["max_minutes_per_day"] / 60.0 > row["hours_per_year"] > 0:
+            break
+    else:
+        raise AssertionError(f"no case that rounds down among {tried}")
+    at_limit = flicker.at_receptors(g, turb, home, 100.0, 100.0, 2027, days=[78], limit_hours_year=row["hours_per_year"],
+                                    limit_min_day=row["max_minutes_per_day"])
+    assert not at_limit["receptors"][0]["over_hours_limit"] and not at_limit["receptors"][0]["over_day_limit"]
+    assert at_limit["over_limit"] == 0 and at_limit["over_hours_limit"] == 0
+    below = flicker.at_receptors(g, turb, home, 100.0, 100.0, 2027, days=[78], limit_hours_year=row["hours_per_year"] - 0.1)
+    assert below["receptors"][0]["over_hours_limit"] and below["over_limit"] == 1
+    assert "midnight at UTC+0 h, the zone of the site's longitude" in at_limit["method"]
+    assert flicker.at_receptors(g, turb, home, 100.0, 100.0, 2027, days=[78], utc_offset_h=3.0)["method"].endswith("midnight at UTC+3 h")
