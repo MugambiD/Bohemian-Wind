@@ -303,7 +303,8 @@ def findings(ctx: dict) -> list[str]:
     for pr in an.get("pairs", []):
         if pr.get("drift_months"):
             out.append(f"<b>Possible cup drift at {pr['height']:g} m:</b> monthly ratio {html.escape(pr['a'])} / "
-                       f"{html.escape(pr['b'])} off by more than 2% in " + ", ".join(f"{m} ({v:+.1f}%)" for m, v in pr["drift_months"]) + ".")
+                       f"{html.escape(pr['b'])} off its median month by more than 2% in "
+                       + ", ".join(f"{m} ({v:+.1f}%)" for m, v in pr["drift_months"]) + ".")
     conv = ctx.get("conversion") or {}
     reasons = conv.get("failure_reasons") or {}
     if conv.get("failure_logs"):
@@ -480,10 +481,12 @@ def write_html(path: Path, ctx: dict) -> None:
             txt.append(f"Lowest ratio at {pr['shadow_a_deg']:.0f}° ({_fmt(pr['shadow_a_ratio'], 3)}): {html.escape(pr['a'])} in the mast wake. "
                        f"Highest at {pr['shadow_b_deg']:.0f}° ({_fmt(pr['shadow_b_ratio'], 3)}): {html.escape(pr['b'])} in the wake.")
         if pr.get("drift_months"):
-            txt.append("<b>Possible drift or damage:</b> monthly ratio off the campaign median by more than 2% in " +
-                       ", ".join(f"{m} ({v:+.1f}%)" for m, v in pr["drift_months"]) + ". Check calibrations and site visit notes.")
+            txt.append("<b>Possible drift or damage:</b> monthly ratio off its median month by more than 2% in " +
+                       ", ".join(f"{m} ({v:+.1f}%)" for m, v in pr["drift_months"]) +
+                       f". A plus sign means {html.escape(pr['a'])} reads higher, or {html.escape(pr['b'])} lower, than in the "
+                       "other months: the ratio cannot say which. Check calibrations and site visit notes.")
         elif "monthly" in pr:
-            txt.append("Monthly ratio stays within 2% of the campaign median: no sign of cup drift.")
+            txt.append("Monthly ratio stays within 2% of its median month: no sign of cup drift.")
         wake = pd.DataFrame(pr.get("wake", [])).drop(columns=["note"], errors="ignore")
         pair_html.append("<p>" + " ".join(txt) + "</p>" + _img(chart_pair(pr), f"pair ratio {pr['height']} m") +
                          ("<p class='muted'>Mast wake against the logged boom bearings:</p>" + _table(wake, nd=1) if not wake.empty else ""))

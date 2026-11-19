@@ -135,7 +135,11 @@ def pair_analysis(data, valid, a: Sensor, b: Sensor, wd: pd.Series | None, vane_
         monthly = monthly[monthly["size"] >= 100]
         res["monthly"] = monthly
         if len(monthly):
-            ref = float(ratio[mf].median())
+            # the yardstick is the middle month, each usable month counting once. The median of all records leans
+            # towards the fault itself: on the test mast, a cup reading 3 % low over the last quarter of the campaign
+            # pulled it by 0.4 %, and the first faulty month then showed as 1.8 % and slipped under the threshold
+            ref = float(monthly["median"].median())
+            res["monthly_ref"] = ref
             dev = (monthly["median"] / ref - 1.0) * 100.0
             res["drift_months"] = [(str(p), float(v)) for p, v in dev.items() if abs(v) > 2.0]
         # per sector, prefer the cup that reads higher: it is the one outside the mast wake

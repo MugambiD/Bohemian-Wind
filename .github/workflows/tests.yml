@@ -10,9 +10,11 @@ jobs:
           - os: ubuntu-latest
             root: /tmp
             src: /tmp/src
+            demo: /tmp/fixture/demo_data.csv
           - os: windows-latest
             root: 'D:\'
             src: 'D:\src'
+            demo: 'D:\fixture\demo_data.csv'
     defaults:
       run:
         shell: bash
@@ -36,9 +38,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pytest
           pip install rasterio || echo "rasterio is not available here: the atlas test is skipped"
+      # The synthetic-mast tests plant known faults in a real year of mast data: brightwind's demo file (MIT licence),
+      # taken from its published wheel and used here only, never copied into this repository. Nothing in the wheel is run.
+      - name: Mast data for the synthetic-mast tests
+        working-directory: ${{ matrix.root }}
+        run: |
+          pip download --no-deps --only-binary=:all: brightwind==2.7.0 -d fixture
+          python -c "import hashlib, pathlib, zipfile; d = pathlib.Path('fixture'); z = zipfile.ZipFile(next(d.glob('brightwind-2.7.0-*.whl'))); raw = z.read(next(n for n in z.namelist() if n.endswith('/demo_data.csv'))); assert hashlib.sha256(raw).hexdigest() == 'd6e578c23e0244600aa3151eda8d55fd132135f3f69e0467abbba057c4779529', 'demo_data.csv is not the file the tests were written for'; (d / 'demo_data.csv').write_bytes(raw)"
       - name: Tests
         working-directory: ${{ matrix.src }}
-        run: python -m pytest tests -q
+        env:
+          BW_DEMO_CSV: ${{ matrix.demo }}
+        run: python -m pytest tests -q -rs
       - name: The demo project runs from the command line
         working-directory: ${{ matrix.src }}
         run: python main.py demo demo-project

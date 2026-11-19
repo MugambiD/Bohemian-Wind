@@ -30,7 +30,7 @@ Built with PyInstaller (GPL-2.0 with the bootloader exception, which permits dis
 ## Not bundled
 
 - **NRG SymphoniePRO Desktop** converts RLD files. Install it separately from NRG Systems; it is used under NRG's own licence. The command-line call follows NRG's open-source nrgpy library (MIT).
-- **Test data.** Some older tests build a synthetic mast from brightwind's demo dataset (MIT) and read NRG's sample exports from nrgpy's tests (MIT). Neither ships with the program; those tests are skipped when the files are absent.
+- **Test data.** Some tests build a synthetic mast from brightwind's demo dataset (MIT) and read NRG's sample exports from nrgpy's tests (MIT). Neither ships with the program or is kept in this repository. The automatic test runs take brightwind's file from its published wheel each time; on a computer without the files those tests are skipped.
 
 ## Data sources the program can download or read
 

@@ -167,8 +167,13 @@ def test_config_change_found(mast):
 def test_cup_drift_found(mast):
     pair = next(p for p in mast["an"]["pairs"] if p["height"] == 40.0)
     months = dict(pair["drift_months"])
-    assert set(months) >= {"2016-12", "2017-01", "2017-02"}
-    assert all(-4.0 < v < -2.0 for v in months.values())  # planted -3 %; months vary about ±0.6 %
+    assert set(months) == {"2016-12", "2017-01", "2017-02"}       # every month of the fault, the first included, and no other
+    # Ch5 reads 3 % low from December on. Which cup is on top of the ratio is the pairing's choice, so the sign is
+    # worked out from it: the ratio falls by 3 % with Ch5 on top and rises by 1 / 0.97 - 1 with Ch5 below.
+    assert {pair["a"][-5:], pair["b"][-5:]} == {"(Ch5)", "(Ch6)"}
+    planted = -3.0 if pair["a"].endswith("(Ch5)") else (1 / 0.97 - 1) * 100
+    assert all(abs(v - planted) < 1.2 for v in months.values())   # the months vary by just under 1 %
+    assert pair["monthly_ref"] == pytest.approx(float(pair["monthly"]["median"].median()))    # the middle month is the yardstick
 
 
 def test_no_false_inconsistency(mast):
