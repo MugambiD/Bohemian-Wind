@@ -144,8 +144,13 @@ def _why(text: str) -> str:
     """The reason in a program's own messages, short enough to show."""
     if re.search(r"passw|encrypt", text, re.I):
         return "it is protected by a password"
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip() and not ln.lower().startswith(("7-zip", "unrar ", "scanning"))]
-    return (lines[-1] if lines else "the program gave no reason")[:200]
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    lines = [ln for ln in lines if not ln.lower().startswith(("7-zip", "unrar ", "scanning")) and "error exit delayed" not in ln.lower()]
+    if not lines:
+        return "the program gave no reason"
+    own = re.compile(r"^(?:bsd)?tar(?:\.exe)?:\s*", re.I)
+    # tar says what went wrong first and sums up after; 7-Zip and UnRAR name the file first and the reason last
+    return own.sub("", lines[0] if own.match(lines[0]) else lines[-1])[:200]
 
 
 # ---------- names ----------
@@ -237,35 +242,73 @@ def _tar(archive: Path, out: Path, other: dict) -> list:
         raise UnpackError(f"it is damaged or not a tar file ({e})") from None
 
 
-def _with_tool(archive: Path, out: Path, other: dict, tool: tuple) -> list:
+def _names(listing: str) -> list:
+    return [ln.rstrip("\r") for ln in listing.splitlines() if ln.strip() and not ln.rstrip("\r").endswith(("/", "\\"))]
+
+
+def _tar_into(exe: str, archive: Path, tmp: str, other: dict, as_stream: bool) -> bool:
+    """Unpack the logger files of an archive into tmp with the system's archive program. False when it holds none."""
+    name, feed = ("-", archive) if as_stream else (str(archive), None)
+    code, listing, err = _run([exe, "-tf", name], feed)
+    if code != 0:
+        raise UnpackError(_why(err or listing))
+    names = _names(listing)
+    if not names:                           # an archive of nothing is no archive: another program may read it
+        raise UnpackError("the program found nothing in it")
+    _tally(names, other)
+    take = [n for n in names if _wanted(n)]
+    if not take:
+        return False
+    ends = sorted({os.path.splitext(n)[1] for n in take})          # as spelt in the archive: .dat, .DAT
+    code, said, err = _run([exe, "-xf", name, "-C", tmp, *[a for e in ends for a in ("--include", f"*{e}")]], feed)
+    if code != 0:
+        raise UnpackError(_why(err or said))
+    return True
+
+
+def _with_tool(archive: Path, out: Path, other: dict, tool: tuple) -> tuple:
     """Unpack with one of the computer's programs: into a folder of its own first, from which only the logger
-    files are taken. Names inside the archive never decide where a file is written."""
+    files are taken. Names inside the archive never decide where a file is written. Returns (file names, a note
+    for the working log or "")."""
     _, exe, how = tool
+    note = ""
     with tempfile.TemporaryDirectory(prefix=".opening-", dir=out.parent) as tmp:
         if how == "tar":
             # A RAR archive goes to the program as a stream, not as a file name. Given the file, the program looks at
             # its end first, and an archive that ends in a ZIP file kept unpacked inside it (WinRAR keeps them so)
-            # is then taken for that ZIP file: its own files would be passed over without a word.
-            name, feed = ("-", archive) if kind(archive) == "rar" else (str(archive), None)
-            code, listing, err = _run([exe, "-tf", name], feed)
-            if code != 0:
-                raise UnpackError(_why(err or listing))
-            names = [ln.rstrip("\r") for ln in listing.splitlines() if ln.strip() and not ln.rstrip("\r").endswith("/")]
-            if not names:                   # an archive of nothing is no archive: another program may read it
-                raise UnpackError("the program found nothing in it")
-            _tally(names, other)
-            take = [n for n in names if _wanted(n)]
-            if not take:
-                return []
-            ends = sorted({os.path.splitext(n)[1] for n in take})          # as spelt in the archive: .dat, .DAT
-            code, said, err = _run([exe, "-xf", name, "-C", tmp, *[a for e in ends for a in ("--include", f"*{e}")]], feed)
-            if code != 0:
-                raise UnpackError(_why(err or said))
+            # is then taken for that ZIP file: its own files would be passed over without a word. Only if the
+            # stream is refused is the file name given after all.
+            if kind(archive) == "rar":
+                try:
+                    _tar_into(exe, archive, tmp, other, as_stream=True)
+                except UnpackError as e:
+                    for f in Path(tmp).rglob("*"):
+                        if f.is_file():
+                            f.unlink()
+                    tally = {}
+                    try:
+                        _tar_into(exe, archive, tmp, tally, as_stream=False)
+                    except UnpackError as again:
+                        raise UnpackError(f"{e}; given the file name instead of the stream: {again}") from None
+                    other.clear()
+                    other.update(tally)
+                    note = f"{archive.name} was not taken as a stream ({e}) and was opened by its file name instead"
+            else:
+                _tar_into(exe, archive, tmp, other, as_stream=False)
         elif how == "7z":
-            code, said, err = _run([exe, "x", "-y", "-bd", "-ssc-", f"-o{tmp}", str(archive), *[f"-ir!*{s}" for s in WANTED]])
+            code, listing, err = _run([exe, "l", "-slt", "-ba", "-p-", str(archive)])
+            if code > 1:
+                raise UnpackError(_why(err or listing))
+            blocks = [dict(ln.split(" = ", 1) for ln in b.splitlines() if " = " in ln) for b in listing.replace("\r", "").split("\n\n")]
+            _tally([b["Path"] for b in blocks if b.get("Path") and b.get("Folder") != "+"], other)
+            code, said, err = _run([exe, "x", "-y", "-bd", "-ssc-", "-p-", f"-o{tmp}", str(archive), *[f"-ir!*{s}" for s in WANTED]])
             if code > 1:                    # 1 is a warning: the files are there
                 raise UnpackError(_why(err or said))
         else:
+            code, listing, err = _run([exe, "lb", "-p-", str(archive)])
+            if code not in (0, 1):
+                raise UnpackError(_why(err or listing))
+            _tally(_names(listing), other)
             code, said, err = _run([exe, "x", "-y", "-o+", "-p-", str(archive), *[f"*{s}" for s in WANTED], tmp + os.sep])
             if code not in (0, 1):
                 raise UnpackError(_why(err or said))
@@ -278,7 +321,7 @@ def _with_tool(archive: Path, out: Path, other: dict, tool: tuple) -> list:
             raise UnpackError("it holds more than 8 GB of logger files, which no mast produces")
         for name, f in rel.items():
             os.replace(f, out / where[name])
-        return sorted(where.values())
+        return sorted(where.values()), note
 
 
 def _with_unrar_package(archive: Path, out: Path, other: dict) -> list:
@@ -297,15 +340,15 @@ def _with_unrar_package(archive: Path, out: Path, other: dict) -> list:
 
 
 def _open(archive: Path, out: Path, other: dict) -> tuple:
-    """Unpack the logger files of one archive into `out`. Returns (file names, what opened it)."""
+    """Unpack the logger files of one archive into `out`. Returns (file names, what opened it, a note or "")."""
     k = kind(archive)
     if k == "zip":
         try:
-            return _zip(archive, out, other), "Python"
+            return _zip(archive, out, other), "Python", ""
         except UnpackError as e:
             first = e                        # a method Python does not have: the computer's program may
     elif k == "tar":
-        return _tar(archive, out, other), "Python"
+        return _tar(archive, out, other), "Python", ""
     else:
         first = None
     reasons = []
@@ -313,9 +356,13 @@ def _open(archive: Path, out: Path, other: dict) -> tuple:
         if tool[2] == "unrar" and k != "rar":
             continue
         try:
-            return _with_tool(archive, out, dict() if reasons else other, tool), tool[0]
+            other.clear()
+            files, note = _with_tool(archive, out, other, tool)
+            if reasons:
+                note = "; ".join(x for x in (note, f"{archive.name}: {reasons[0]}, so {tool[0]} opened it") if x)
+            return files, tool[0], note
         except UnpackError as e:
-            reasons.append(str(e))
+            reasons.append(f"{tool[0]} said: {e}")
             for f in out.iterdir():          # what a failed try left behind
                 if f.name != MARK and f.is_file():
                     f.unlink()
@@ -325,11 +372,12 @@ def _open(archive: Path, out: Path, other: dict) -> tuple:
         except ImportError:
             pass
         else:
-            return _with_unrar_package(archive, out, other), "the unrar2-cffi package"
+            other.clear()
+            return _with_unrar_package(archive, out, other), "the unrar2-cffi package", "; ".join(reasons)
     if first is not None:
         raise first
     if reasons:
-        raise UnpackError(reasons[0])
+        raise UnpackError("; ".join(reasons) if len(reasons) > 1 else reasons[0].split(" said: ", 1)[1])
     raise UnpackError(f"this computer has no program that opens {LABEL[k]} archives (Windows 10 and 11 bring one; "
                       "7-Zip does it everywhere)")
 
@@ -369,7 +417,8 @@ def unpack(archives: list, base, dest, log=print, keep=None) -> dict:
     """
     base, dest = Path(base), paths.tidy(dest)
     names = _folders(archives, base)
-    res = {"archives": len(archives), "opened": 0, "now": 0, "files": 0, "failed": [], "other": {}, "with": [], "dest": dest}
+    res = {"archives": len(archives), "opened": 0, "now": 0, "files": 0, "failed": [], "other": {}, "with": [], "notes": [],
+           "dest": dest}
     announced = False
     for a in archives:
         out = dest / names[a]
@@ -393,7 +442,9 @@ def unpack(archives: list, base, dest, log=print, keep=None) -> dict:
         out.mkdir(parents=True, exist_ok=True)
         other = {}
         try:
-            files, by = _open(a, out, other)
+            files, by, note = _open(a, out, other)
+            if note:
+                res["notes"].append(note)
         except UnpackError as e:
             shutil.rmtree(out, ignore_errors=True)
             res["failed"].append((a.name, str(e)))
@@ -426,6 +477,8 @@ def unpack(archives: list, base, dest, log=print, keep=None) -> dict:
         log(f"  {res['files']:,} logger files from {res['opened']:,} archive{'s' if res['opened'] != 1 else ''}"
             + (f" ({res['now']:,} unpacked now, with {' and '.join(res['with'])})" if res["with"] else "")
             + f". They are kept in {dest}; the archives are untouched.")
+    for note in res["notes"][:3]:
+        log(f"  Note: {note}." + (f" The same goes for {len(res['notes']) - 3:,} more." if note is res["notes"][2] and len(res["notes"]) > 3 else ""))
     for name, why in res["failed"][:5]:
         log(f"  NOT OPENED {name}: {why}.")
     if len(res["failed"]) > 5:

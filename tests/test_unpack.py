@@ -194,7 +194,7 @@ def test_every_program_that_opens_rar_gives_the_same_files(mast, tmp_path, monke
     write_rar(data / "month.rar", {f"Daily Files/{n}": files[n] for n in names[:4]} | {"Daily Files/LOG.TXT": b"a note\n", "UPPER.DAT": files[names[4]]})
     monkeypatch.setattr(unpack, "_TOOLS", [tool])
     r = unpack.unpack(unpack.find(data), data, dest, log=quiet)
-    assert r["failed"] == [] and r["with"] == [tool[0]]
+    assert r["failed"] == [] and r["notes"] == [] and r["with"] == [tool[0]], (r["failed"], r["notes"], unpack._said([tool[1], "--version"])[:200])
     got = {p.name: p.read_bytes() for p in dest.rglob("*") if p.is_file() and p.name != unpack.MARK}
     assert got == {**{n: files[n] for n in names[:4]}, "LOG.TXT": b"a note\n", "UPPER.DAT": files[names[4]]}       # .DAT and .TXT too
 
@@ -212,6 +212,8 @@ def test_the_unrar_program_is_asked_in_its_own_words(mast, tmp_path, monkeypatch
 
     def stand_in(cmd, feed=None):
         asked.append(cmd)
+        if cmd[1] == "lb":                                                          # the bare list of names
+            return 0, f"sub\\{name}\nsub\\000123.rld\n", ""
         (Path(cmd[-1]) / "sub").mkdir()
         (Path(cmd[-1]) / "sub" / name).write_bytes(content)
         return 0, "All OK", ""
@@ -220,7 +222,8 @@ def test_the_unrar_program_is_asked_in_its_own_words(mast, tmp_path, monkeypatch
     monkeypatch.setattr(unpack, "_run", stand_in)
     r = unpack.unpack(unpack.find(data), data, dest, log=quiet)
     assert r["failed"] == [] and r["with"] == ["UnRAR"] and (dest / "month" / name).read_bytes() == content
-    cmd = asked[0]
+    assert asked[0] == ["C:/Program Files/WinRAR/UnRAR.exe", "lb", "-p-", str(data / "month.rar")] and r["other"] == {".rld": 1}
+    cmd = asked[1]
     assert cmd[:5] == ["C:/Program Files/WinRAR/UnRAR.exe", "x", "-y", "-o+", "-p-"] and cmd[5] == str(data / "month.rar")
     assert cmd[6:9] == ["*.dat", "*.txt", "*.csv"] and cmd[9].endswith(("/", "\\")) and Path(cmd[9]).parent == dest
 
@@ -369,3 +372,5 @@ def test_the_reason_a_program_gives_is_put_in_plain_words():
     assert unpack._why("tar.exe: Encrypted file is unsupported\n") == "it is protected by a password"
     assert unpack._why("7-Zip 23.01\n\nScanning the drive\nERROR: month.7z\nCannot open the file as archive\n") == "Cannot open the file as archive"
     assert unpack._why("") == "the program gave no reason"
+    assert unpack._why("tar.exe: x.dat: Can't create 'x.dat'\ntar.exe: Error exit delayed from previous errors.\n") == "x.dat: Can't create 'x.dat'"
+    assert unpack._why("bsdtar: Error opening archive: Unrecognized archive format\n") == "Error opening archive: Unrecognized archive format"

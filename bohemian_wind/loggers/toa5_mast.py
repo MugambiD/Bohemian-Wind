@@ -73,7 +73,15 @@ FORMATS_READ = ("Campbell Scientific TOA5, SecondWind Nomad2 Multi-Track export,
 
 
 def text_reader(path):
-    """The reader for a text export, or None when the file is none of the text formats."""
+    """The reader for a text export, or None when the file is none of the text formats. A TOA5 file says what it is
+    in its first bytes: it is not opened three more times to rule the others out. On a network drive, or a disk the
+    virus scanner watches, every opening of a file costs, and a mast has thousands of them."""
+    try:
+        with open(path, "rb") as fh:
+            if fh.read(8).lstrip(b"\xef\xbb\xbf").startswith(b'"TOA5"'):
+                return None
+    except OSError:
+        return None
     for sniff, read in TEXT_READERS:
         if sniff(path):
             return read
