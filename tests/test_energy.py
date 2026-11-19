@@ -169,3 +169,34 @@ def test_losses_and_uncertainty_arithmetic():
     assert u["p90_long_term"] == pytest.approx(100 * (1 - 1.2816 * 0.10))
     assert u["p75_long_term"] == pytest.approx(100 * (1 - 0.6745 * 0.10))
     assert set(budget.DEFAULT_SPEED_UNCERTAINTY) and len(budget.losses_table()) == 7
+
+
+def test_the_uncertainty_of_carrying_the_wind_depends_on_where_each_turbine_stands():
+    assert budget.horizontal_pct(0.0, 0.0, 1.0) == pytest.approx(budget.H_BASE_PCT)            # next to the mast
+    assert budget.horizontal_pct(4.0, 0.0, 1.0) == pytest.approx(math.hypot(2.0, 4.0))          # 1 % a km
+    assert budget.horizontal_pct(0.0, -100.0, 1.0) == pytest.approx(math.hypot(2.0, 2.0))       # 1 % per 50 m, up or down
+    assert budget.horizontal_pct(0.0, 0.0, 1.12) == pytest.approx(math.hypot(2.0, 3.0))         # a quarter of 12 % speed-up
+    assert budget.vertical_pct(120.0, 124.0) == 1.0 and budget.vertical_pct(120.0, 80.0) == pytest.approx(3.0)
+    near = {"dist_mast_km": 1.0, "dz_m": 0.0, "ratio_to_mast": 1.0}
+    far = {"dist_mast_km": 7.0, "dz_m": 0.0, "ratio_to_mast": 1.0}
+    terms, each = budget.extrapolation_terms([near, far], [3.0, 1.0], 100.0, 80.0)
+    assert each == pytest.approx([math.hypot(2, 1), math.hypot(2, 7)])
+    assert terms[budget.HORIZONTAL] == pytest.approx(round((3 * math.hypot(2, 1) + math.hypot(2, 7)) / 4, 2))   # weighted by energy
+    assert terms[budget.VERTICAL] == 2.0
+
+
+def test_a_layout_farther_from_the_mast_is_less_certain():
+    c = climate()
+    wf = flat_field(c, half_km=9)
+    near = assess.design(wf, c, None, T, 2, rho_hub=1.0, fixed_xy=([0.0, 1500.0], [1500.0, 0.0]))
+    far = assess.design(wf, c, None, T, 2, rho_hub=1.0, fixed_xy=([6000.0, 7500.0], [0.0, 1500.0]))
+    for r in (near, far):
+        bp = r["uncertainty"]["by_position"]
+        assert bp["hub_m"] == 120.0 and bp["top_m"] == c["height_m"]
+        assert all(q["horizontal_unc_pct"] > 0 and q["sigma_energy_pct"] > q["horizontal_unc_pct"] for q in r["positions"])
+    assert far["uncertainty"]["by_position"]["horizontal_pct_ws"] > near["uncertainty"]["by_position"]["horizontal_pct_ws"] + 3
+    assert far["uncertainty"]["sigma_pct"]["long_term"] > near["uncertainty"]["sigma_pct"]["long_term"]
+    assert far["uncertainty"]["p90_10_year"] / far["p50_gwh"] < near["uncertainty"]["p90_10_year"] / near["p50_gwh"]
+    given = assess.design(wf, c, None, T, 2, rho_hub=1.0, fixed_xy=([6000.0, 7500.0], [0.0, 1500.0]),
+                          speed_uncertainty={"all of it": 5.0})                                  # a budget given as a whole is kept
+    assert "by_position" not in given["uncertainty"] and list(given["uncertainty"]["terms_energy_pct"])[0] == "all of it"

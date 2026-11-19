@@ -249,6 +249,7 @@ def test_homes_outside_the_terrain_are_counted_listed_and_weighed(project, tmp_p
     assert len(homes) == 40 and all(abs(x) < mapped and abs(y) < mapped for _, x, y in homes)
     # three turbines of the user's own near the eastern edge of the wind map; a home between that edge and the edge of
     # the terrain, one 250 m beyond the terrain, one far away
+    p.update("layout", {"rules": {"radius_km": 8.0}})                     # turbines up to 7.9 km out: within the search radius
     p.attach("positions", points(tmp_path / "turbines.csv", site, [("E1", 7800.0, 0.0), ("E2", 7800.0, 900.0), ("E3", 6900.0, 450.0)]))
     extra = [("Fence farm", mapped + 300.0, 0.0), ("Edge farm", edge + 250.0, 0.0), ("Far town", 40000.0, 5000.0)]
     p.attach("receptors", points(tmp_path / "homes.csv", site, homes + extra))

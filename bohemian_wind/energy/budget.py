@@ -31,13 +31,25 @@ DEFAULT_LOSSES = [
     Loss("Curtailment", "Operational curtailment", 0.5, "ramp limits and environmental stops; grid curtailment not included"),
 ]
 
-# 1 sigma, per cent of wind speed
+# 1 sigma, per cent of wind speed. The two extrapolation terms are the fallbacks for a call that gives no turbine
+# positions; a layout works them out from where its turbines stand (extrapolation_terms).
+VERTICAL = "Vertical extrapolation from the mast top to hub height"
+HORIZONTAL = "Horizontal extrapolation from the mast to the turbines (screening flow model)"
 DEFAULT_SPEED_UNCERTAINTY = {
     "Measurement (one mast: sensors, mounting, data recovery)": 2.5,
     "Long-term correction (one reanalysis index)": 3.0,
-    "Vertical extrapolation from the mast top to hub height": 3.0,
-    "Horizontal extrapolation from the mast to the turbines (screening flow model)": 8.0,
+    VERTICAL: 3.0,
+    HORIZONTAL: 8.0,
 }
+
+# How far the mast's wind can be carried, 1 sigma in per cent of wind speed. Developer assumptions for a screening
+# flow model, not values from a standard; edit them here. A turbine next to the mast still carries H_BASE.
+H_BASE_PCT = 2.0            # the flow model at its best, next to the mast
+H_PER_KM_PCT = 1.0          # for every km between the turbine and the mast
+H_PER_50M_PCT = 1.0         # for every 50 m the turbine's ground lies above or below the mast's
+H_SPEEDUP_SHARE = 0.25      # a quarter of the speed-up (or slow-down) the flow model gives the position
+V_BASE_PCT = 1.0            # hub height within the heights measured
+V_PER_10M_PCT = 0.5         # for every 10 m the hub stands above the top anemometer
 # 1 sigma, per cent of energy
 DEFAULT_ENERGY_UNCERTAINTY = {
     "Power curve (generic, not warranted by a manufacturer)": 6.0,
@@ -82,6 +94,29 @@ def loss_factor(losses=None) -> float:
 
 def losses_table(losses=None) -> list:
     return [asdict(x) for x in losses_from(losses)]
+
+
+def horizontal_pct(dist_km: float, dz_m: float, ratio_to_mast: float) -> float:
+    """1 sigma, per cent of wind speed, for carrying the mast's wind to one turbine position. The four parts are
+    taken as independent: root of the sum of squares."""
+    return math.sqrt(H_BASE_PCT ** 2 + (H_PER_KM_PCT * dist_km) ** 2 + (H_PER_50M_PCT * dz_m / 50.0) ** 2
+                     + (H_SPEEDUP_SHARE * 100.0 * (ratio_to_mast - 1.0)) ** 2)
+
+
+def vertical_pct(hub_m: float, top_m: float) -> float:
+    """1 sigma, per cent of wind speed, for carrying the wind from the top anemometer to the hub."""
+    return V_BASE_PCT + V_PER_10M_PCT * max(0.0, hub_m - top_m) / 10.0
+
+
+def extrapolation_terms(positions: list, weights, hub_m: float, top_m: float) -> tuple:
+    """The two extrapolation terms of a layout, and each turbine's horizontal figure. positions: dicts with
+    dist_mast_km, dz_m and ratio_to_mast. The farm's horizontal term is the mean of the turbines' figures weighted by
+    their energy: the errors of neighbouring positions go together, so they are not averaged away."""
+    each = [horizontal_pct(q["dist_mast_km"], q["dz_m"], q["ratio_to_mast"]) for q in positions]
+    w = [max(float(v), 0.0) for v in weights]
+    total = sum(w) or 1.0
+    farm = sum(e * v for e, v in zip(each, w)) / total if sum(w) else sum(each) / max(len(each), 1)
+    return {VERTICAL: round(vertical_pct(hub_m, top_m), 2), HORIZONTAL: round(farm, 2)}, each
 
 
 def uncertainty(p50: float, energy_per_speed: float, speed_terms: dict | None = None,

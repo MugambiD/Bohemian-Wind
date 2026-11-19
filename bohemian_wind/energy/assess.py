@@ -73,9 +73,10 @@ def design(field: WindField, clim: dict, mask: np.ndarray, turbine: Turbine, n_t
            cross_d: float = 3.0, along_d: float = 7.0, link_m: float | None = 2500.0, wake: str = "niayifar",
            refine: bool = True, refine_seconds: float = 90.0, losses=None, speed_uncertainty: dict | None = None,
            energy_uncertainty: dict | None = None, iav_speed: float = budget.DEFAULT_IAV_SPEED,
-           fixed_xy=None, mast_xy=(0.0, 0.0), log=lambda m: None) -> dict:
+           fixed_xy=None, mast_xy=(0.0, 0.0), top_m: float | None = None, log=lambda m: None) -> dict:
     """field: wind field at the hub height (bohemian_wind.flow.fields.wind_field with the same climate, factor and
-    shear). mask: buildable cells. fixed_xy: (x, y) arrays to evaluate a given layout instead of designing one."""
+    shear). mask: buildable cells. fixed_xy: (x, y) arrays to evaluate a given layout instead of designing one.
+    top_m: height of the top anemometer (default: the climate's height), for the vertical extrapolation term."""
     if abs(field.height_m - turbine.hub_m) > 0.5:
         raise EnergyError(f"The wind field is at {field.height_m:g} m but the hub height is {turbine.hub_m:g} m.")
     if wake not in wakes.WAKE_MODELS:
@@ -160,7 +161,6 @@ def design(field: WindField, clim: dict, mask: np.ndarray, turbine: Turbine, n_t
     e_terms = dict(budget.DEFAULT_ENERGY_UNCERTAINTY if energy_uncertainty is None else energy_uncertainty)
     if "Wake model" in e_terms:
         e_terms["Wake model"] = max(e_terms["Wake model"], spread / 2)
-    unc = budget.uncertainty(res["p50_gwh"], energy_per_speed, speed_uncertainty, e_terms, iav_speed)
 
     lat, lon = grid.to_latlon(x, y)
     free_ws, ground = at(field.mean_ws, x, y), at(grid.elev, x, y)
@@ -170,11 +170,31 @@ def design(field: WindField, clim: dict, mask: np.ndarray, turbine: Turbine, n_t
         positions.append({
             "id": f"T{j + 1:02d}", "x": float(x[j]), "y": float(y[j]), "lat": float(lat[j]), "lon": float(lon[j]),
             "ground_elev_m": float(ground[j]), "slope_pct": float(slope[j]),
-            "dist_mast_km": float(np.hypot(x[j] - mast_xy[0], y[j] - mast_xy[1]) / 1000),
+            "dist_mast_km": float(np.hypot(x[j] - mast_xy[0], y[j] - mast_xy[1]) / 1000), "dz_m": float(ground[j] - elev_mast),
             "free_ws": float(free_ws[j]), "ratio_to_mast": float(free_ws[j] / field.mast_mean_ws),
             "gross_mwh": float(gross[j]), "wake_loss_pct": float(100 * (1 - net[j] / gross[j])),
             "after_wake_mwh": float(net[j]), "p50_mwh": float(net[j] * other),
             "capacity_factor": float(net[j] * other / (turbine.rated_kw / 1000.0 * wakes.HOURS))})
+    # the uncertainty of carrying the mast's wind to where each turbine stands, then the budget of the whole farm
+    if speed_uncertainty is None:
+        top = float(clim["height_m"] if top_m is None else top_m)
+        ext, each = budget.extrapolation_terms(positions, [q["p50_mwh"] for q in positions], turbine.hub_m, top)
+        speed_terms = {**budget.DEFAULT_SPEED_UNCERTAINTY, **ext}
+        rest = sum(v * v for k, v in speed_terms.items() if k != budget.HORIZONTAL)
+        energy_rest = sum(v * v for v in e_terms.values())
+        for q, h in zip(positions, each):
+            q["horizontal_unc_pct"] = round(h, 2)                  # of wind speed
+            q["sigma_energy_pct"] = round(float(np.sqrt((rest + h * h) * energy_per_speed ** 2 + energy_rest)), 2)
+    else:
+        speed_terms = speed_uncertainty
+    unc = budget.uncertainty(res["p50_gwh"], energy_per_speed, speed_terms, e_terms, iav_speed)
+    if speed_uncertainty is None:
+        unc["by_position"] = {"rule": {"base_pct": budget.H_BASE_PCT, "per_km_pct": budget.H_PER_KM_PCT,
+                                       "per_50m_height_pct": budget.H_PER_50M_PCT, "share_of_speed_up": budget.H_SPEEDUP_SHARE,
+                                       "vertical_base_pct": budget.V_BASE_PCT, "vertical_per_10m_pct": budget.V_PER_10M_PCT},
+                              "horizontal_pct_ws": ext[budget.HORIZONTAL], "vertical_pct_ws": ext[budget.VERTICAL],
+                              "top_m": top, "hub_m": turbine.hub_m,
+                              "horizontal_range_pct_ws": [round(min(each), 2), round(max(each), 2)]}
     hi = max(p["ratio_to_mast"] for p in positions)
     cautions = []
     if ceiling["change_pct"] < -CEILING_CAUTION_PCT:

@@ -226,7 +226,7 @@ def test_the_unrar_program_is_asked_in_its_own_words(mast, tmp_path, monkeypatch
     assert asked[0] == ["C:/Program Files/WinRAR/UnRAR.exe", "lb", "-p-", str(data / "month.rar")] and r["other"] == {".rld": 1}
     cmd = asked[1]
     assert cmd[:5] == ["C:/Program Files/WinRAR/UnRAR.exe", "x", "-y", "-o+", "-p-"] and cmd[5] == str(data / "month.rar")
-    assert cmd[6:9] == ["*.dat", "*.txt", "*.csv"] and cmd[9].endswith(("/", "\\")) and Path(cmd[9]).parent.parent == dest
+    assert cmd[6:9] == ["*.dat", "*.txt", "*.csv"] and cmd[9].endswith(("/", "\\")) and Path(cmd[9]).parent == dest and Path(cmd[9]).name.startswith(".u")
 
 
 def test_an_archive_that_changes_or_goes_takes_its_unpacked_files_with_it(mast, tmp_path):
@@ -363,6 +363,9 @@ def test_archives_are_counted_not_taken_for_logger_files_and_a_new_one_is_notice
     assert det["format"] is None and det["counts"]["archives"] == 2 and det["found"] == "2 archives" and not det["unread"]
     assert unpack.kind("x.TAR.GZ") == "tar" and unpack.kind("x.RAR") == "rar" and unpack.kind("x.dat") is None
     assert unpack.stem(Path("Mast 2025.tar.gz")) == "Mast 2025"
+    long = "MM0000_DailyDataFiles_20250526_20250617_With_Wrong_Time_UTC+1"            # as loggers' archives are named
+    short = unpack.stem(Path(long + ".rar"))
+    assert len(short) <= unpack.STEM_MAX and short.startswith("MM0000_DailyDataFiles") and short != unpack.stem(Path(long + "2.rar"))
     for name in ("year.part1.rar", "year.part2.rar", "year.part03.rar"):          # one archive in three files: opened by its first
         (data / name).write_bytes(b"Rar!")
     assert [p.name for p in unpack.find(data)] == ["a.zip", "b.tar.gz", "year.part1.rar"]

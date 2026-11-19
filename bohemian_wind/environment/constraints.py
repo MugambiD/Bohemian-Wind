@@ -163,7 +163,8 @@ def points_of(features: list, grid: Grid, prefix: str = "R") -> list:
             continue
         lat, lon = f.coords[0]
         x, y = grid.to_xy(lat, lon)
-        out.append({"name": f.name or f"{prefix}{len(out) + 1:03d}", "lat": lat, "lon": lon, "x": float(x), "y": float(y)})
+        out.append({"name": f.name or f"{prefix}{len(out) + 1:03d}", "lat": lat, "lon": lon, "x": float(x), "y": float(y),
+                    "unnamed": not f.name})
     return out
 
 

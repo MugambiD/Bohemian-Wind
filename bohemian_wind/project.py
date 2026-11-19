@@ -101,6 +101,20 @@ def _canon(v):
         return str(v)
 
 
+def _one_per_place(points: list, within_m: float = 2.0) -> tuple:
+    """Turbine positions with each place once: a point that stands where an earlier one stands (within a couple of
+    metres) is the same turbine written twice. A named point keeps its name over an unnamed one. Returns (points,
+    how many were dropped)."""
+    kept: list = []
+    for g in points:
+        same = next((k for k in kept if abs(k["x"] - g["x"]) <= within_m and abs(k["y"] - g["y"]) <= within_m), None)
+        if same is None:
+            kept.append(dict(g))
+        elif same.get("unnamed") and not g.get("unnamed"):
+            same.update(name=g["name"], unnamed=False)
+    return kept, len(points) - len(kept)
+
+
 def _file_mark(path) -> str:
     """A short mark of a file's content (empty when there is no file). The content is read once per version of the
     file, told apart by size and time of writing; a file written within the last few seconds is read again each
@@ -557,10 +571,12 @@ class Project:
         margin, far = buildings.MARGIN_KM, 0.0
         try:
             given = [f.coords[0] for f in self.features("positions") if f.kind == "point"]
-            if given:                           # turbine positions of the user's own may lie beyond the search radius
+            if given:                           # turbine positions of the user's own: those step 4 takes, within the radius
                 site = self.site()
                 m_lon, m_lat = self._metres(site["lat"])
-                far = max(max(abs((lon - site["lon"]) * m_lon), abs((lat - site["lat"]) * m_lat)) for lat, lon in given) / 1000.0
+                xy = [((lon - site["lon"]) * m_lon, (lat - site["lat"]) * m_lat) for lat, lon in given]
+                xy = [q for q in xy if np.hypot(*q) <= radius * 1000.0 + 1.0]
+                far = max((max(abs(a), abs(b)) for a, b in xy), default=0.0) / 1000.0
             n = len(given) or int(_num(L.get("n_turbines"), "Number of turbines", 1, 150))
             reach = self.reach_m(_num(E.get("sound_power_dba"), "Sound power level", 85, 120),
                                  _num(E.get("noise_limit_dba"), "Noise limit", 20, 80), n, self.turbine().rotor_m)
@@ -819,23 +835,42 @@ class Project:
         f_note = scale["basis"]
         alpha, a_note = self.alpha(clim)
         given = constraints.points_of(self.features("positions"), grid, prefix="T")
-        fixed = None
+        fixed, beyond, twice, n_file = None, [], 0, len(given)
         if given:
-            out = [g["name"] for g in given if not grid.inside(g["x"], g["y"])]
+            given, twice = _one_per_place(given)
+            if twice:
+                log(f"The positions file holds {n_file} points for {len(given)} turbines: {twice} {'stands' if twice == 1 else 'stand'} "
+                    "there twice (WindPRO, for one, writes every turbine as a turbine and as its symbol). Each is counted once.")
+            # The mast's data stand for the wind near it: positions beyond the search radius are not given its wind.
+            reach = rules.radius_km * 1000.0
+            for g in given:
+                g["dist_km"] = float(np.hypot(g["x"], g["y"])) / 1000.0
+            beyond = [g for g in given if g["dist_km"] * 1000.0 > reach + 1.0]
+            within = [g for g in given if g["dist_km"] * 1000.0 <= reach + 1.0]
+            if not within:
+                raise ProjectError((f"None of the {len(given)} turbine positions given lies" if len(given) > 1 else "The turbine position given does not lie")
+                                   + f" within {rules.radius_km:g} km of the mast (the nearest is "
+                                   f"{min(g['dist_km'] for g in given):.1f} km away). The mast's data stand for the wind near it: set a larger "
+                                   "search radius under the siting rules of this step and a wider wind map (step 3), or check the positions file.")
+            out = [g["name"] for g in within if not grid.inside(g["x"], g["y"])]
             if out:
-                raise ProjectError(f"{len(out)} of the {len(given)} turbine positions given {'lies' if len(out) == 1 else 'lie'} outside the mapped area "
-                                   f"({', '.join(out[:5])}{' and others' if len(out) > 5 else ''}). Widen the wind map "
-                                   "(step 3) or correct the positions file.")
+                raise ProjectError(f"{len(out)} of the {len(within)} turbine positions within {rules.radius_km:g} km of the mast "
+                                   f"{'lies' if len(out) == 1 else 'lie'} outside the mapped area ({', '.join(out[:5])}"
+                                   f"{' and others' if len(out) > 5 else ''}). Widen the wind map (step 3) or correct the positions file.")
+            given = within
             fixed = (np.array([g["x"] for g in given]), np.array([g["y"] for g in given]))
             n = len(given)
-            log(f"Using the {n} turbine positions given in {self.s['layout']['positions_file']}: the layout is taken as it is.")
+            log(f"Using the {n} turbine positions given in {self.s['layout']['positions_file']} that lie within {rules.radius_km:g} km of "
+                "the mast: the layout is taken as it is."
+                + (f" {len(beyond)} more {'lies' if len(beyond) == 1 else 'lie'} farther out ({max(g['dist_km'] for g in beyond):.1f} km "
+                   "at most) and {'is' if len(beyond) == 1 else 'are'} left out." if beyond else ""))
         try:
             res = assess.design(wf, clim, mask, turbine, n, lt_factor=scale["scale"], alpha=alpha, rho_hub=rho, fixed_xy=fixed,
                                 cross_d=_num(L.get("cross_d"), "Spacing across the wind", 1.5, 15),
                                 along_d=_num(L.get("along_d"), "Spacing along the wind", 1.5, 20),
                                 link_m=_num(L.get("link_m"), "Link distance", 0, 20000, True) or None,
                                 wake=L.get("wake") or "niayifar", refine=bool(L.get("refine")), refine_seconds=45.0,
-                                losses=L.get("losses"), log=log)
+                                losses=L.get("losses"), top_m=clim.get("height_m"), log=log)
         except EnergyError as e:
             raise ProjectError(str(e)) from e
         res["notes"] = res["notes"] + [n[0].upper() + n[1:] + "." for n in (f_note, a_note, self.vane_offset()[1]) if n] + (
@@ -850,6 +885,27 @@ class Project:
                 f"and the siting rules now reach {need:.1f} km: homes beyond the fetched area are missing from the setback "
                 "rule. Get the buildings again, then place the turbines again.")
         res["given_layout"] = bool(given)
+        res["beyond_radius"] = [{"name": g["name"], "lat": g["lat"], "lon": g["lon"], "dist_mast_km": round(g["dist_km"], 2)} for g in beyond]
+        if beyond:
+            with open(self.path("layout", "beyond_radius.csv"), "w", newline="", encoding="utf-8") as fh:
+                w = csv.writer(fh)
+                w.writerow(["id", "latitude", "longitude", "distance_from_mast_km", "why_left_out"])
+                for g in sorted(beyond, key=lambda g: g["dist_km"]):
+                    w.writerow([g["name"], f"{g['lat']:.6f}", f"{g['lon']:.6f}", f"{g['dist_km']:.2f}",
+                                f"more than {rules.radius_km:g} km from the mast"])
+            far = sorted(beyond, key=lambda g: g["dist_km"])
+            res["warnings"].append(
+                f"{len(beyond)} of the {len(beyond) + len(given)} turbine positions given {'lies' if len(beyond) == 1 else 'lie'} more than "
+                f"{rules.radius_km:g} km from the mast ("
+                + (f"{far[0]['dist_km']:.1f} km" if len(far) == 1 else f"{far[0]['dist_km']:.1f} to {far[-1]['dist_km']:.1f} km")
+                + f") and {'is' if len(beyond) == 1 else 'are'} left out of this estimate: "
+                f"{', '.join(g['name'] for g in far[:12])}{' and others' if len(far) > 12 else ''}. The mast's data do not stand for "
+                "the wind there; a mast nearer to them would. They are listed in layout/beyond_radius.csv.")
+        else:
+            (self.folder / "layout" / "beyond_radius.csv").unlink(missing_ok=True)
+        if twice:
+            res["notes"].append(f"The positions file holds {n_file} points for {len(given) + len(beyond)} turbines; the {twice} that "
+                                "stood twice in it were counted once.")
         if given:
             names = [g["name"] for g in given]
             if len(set(names)) == len(names):
@@ -858,7 +914,8 @@ class Project:
             r_, c_ = grid.index(fixed[0], fixed[1])
             off = [q["id"] for q, ok in zip(res["positions"], mask[r_, c_]) if not ok]
             res["notes"].insert(0, f"The {len(given)} turbine positions were given, not designed: number of turbines, "
-                                   "spacing rules and fine-tuning were not applied.")
+                                   "spacing rules and fine-tuning were not applied."
+                                   + (f" Only those within {rules.radius_km:g} km of the mast were taken." if beyond else ""))
             if off:
                 res["warnings"].append(f"{len(off)} of the {len(given)} given positions {'is' if len(off) == 1 else 'are'} outside the buildable area "
                                        f"of your constraints: {', '.join(off[:12])}{' and others' if len(off) > 12 else ''}.")
@@ -878,12 +935,14 @@ class Project:
             w = csv.writer(fh)
             w.writerow(["id", "latitude", "longitude", "utm_zone", "easting_m", "northing_m", "ground_elevation_m",
                         "hub_height_m", "tip_height_m", "tip_elevation_amsl_m", "free_wind_speed_ms", "gross_mwh",
-                        "wake_loss_pct", "net_p50_mwh", "capacity_factor"])
+                        "wake_loss_pct", "net_p50_mwh", "capacity_factor", "distance_from_mast_km",
+                        "height_above_mast_ground_m", "horizontal_uncertainty_pct_of_wind", "uncertainty_pct_of_energy"])
             for p in res["positions"]:
                 w.writerow([p["id"], f"{p['lat']:.6f}", f"{p['lon']:.6f}", p["utm_zone"], p["easting"], p["northing"],
                             f"{p['ground_elev_m']:.1f}", turbine.hub_m, p["tip_height_m"], p["tip_amsl_m"],
                             f"{p['free_ws']:.2f}", f"{p['gross_mwh']:.0f}", f"{p['wake_loss_pct']:.2f}",
-                            f"{p['p50_mwh']:.0f}", f"{p['capacity_factor']:.3f}"])
+                            f"{p['p50_mwh']:.0f}", f"{p['capacity_factor']:.3f}", f"{p['dist_mast_km']:.2f}", f"{p['dz_m']:.0f}",
+                            p.get("horizontal_unc_pct", ""), p.get("sigma_energy_pct", "")])
         np.savez_compressed(self.path("layout", "buildable.npz"), mask=mask)
         title = f"Layout: {res['n_placed']} x {turbine.name.replace('Generic ', '')}"
         sub = (f"{self.s['name']}: {res['capacity_mw']:.1f} MW, P50 {res['p50_gwh']:.0f} GWh a year "

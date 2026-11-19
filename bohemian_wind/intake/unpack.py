@@ -39,6 +39,7 @@ MARK = ".unpacked.json"                     # in every unpacked folder: which ar
 SCAN_LIMIT = 20000
 MAX_BYTES = 8 << 30                         # logger files of one archive: more than this is not mast data
 TOOL_SECONDS = 900
+STEM_MAX = 32                               # characters of an archive's folder name
 PADDING = 1 << 17                           # zeros after a RAR archive handed to the system's program (see _tar_into)
 VOLUME = re.compile(r"\.part0*(\d+)\.rar$", re.I)      # an archive in several files: month.part1.rar, month.part2.rar
 _NO_WINDOW = 0x08000000 if sys.platform.startswith("win") else 0      # no console window flashing up on Windows
@@ -225,17 +226,23 @@ def _names(listing: str) -> list:
     return [ln.rstrip("\r") for ln in listing.splitlines() if ln.strip() and not ln.rstrip("\r").endswith(("/", "\\"))]
 
 
-def _tar_into(exe: str, archive: Path, tmp: str, into: str, other: dict) -> bool:
+def _tar_into(exe: str, archive: Path, into: str, other: dict) -> bool:
     """Unpack the logger files of an archive into `into` with the system's archive program. False when it holds none."""
-    name = str(archive)
     if kind(archive) == "rar" and not VOLUME.search(archive.name):
         # The program looks at the end of a file before its beginning, and a RAR archive that ends in a ZIP file
         # kept unpacked inside it (WinRAR keeps them so) is then taken for that ZIP file: the archive's own files
-        # would be passed over without a word. So the program gets a copy with nothing but zeros after its end.
-        name = str(Path(tmp) / "copy.rar")
-        with open(archive, "rb") as src, open(name, "wb") as dst:
-            shutil.copyfileobj(src, dst, 1 << 20)
-            dst.write(b"\0" * PADDING)
+        # would be passed over without a word. So the program gets a copy with nothing but zeros after its end,
+        # kept in the computer's own folder for passing files (short paths: see _with_tool).
+        with tempfile.TemporaryDirectory(prefix="bw-") as side:
+            name = os.path.join(side, "copy.rar")
+            with open(archive, "rb") as src, open(name, "wb") as dst:
+                shutil.copyfileobj(src, dst, 1 << 20)
+                dst.write(b"\0" * PADDING)
+            return _tar_named(exe, name, into, other)
+    return _tar_named(exe, str(archive), into, other)
+
+
+def _tar_named(exe: str, name: str, into: str, other: dict) -> bool:
     code, listing, err = _run([exe, "-tf", name])
     if code != 0:
         raise UnpackError(_why(err or listing))
@@ -255,13 +262,12 @@ def _tar_into(exe: str, archive: Path, tmp: str, into: str, other: dict) -> bool
 
 def _with_tool(archive: Path, out: Path, other: dict, tool: tuple) -> list:
     """Unpack with one of the computer's programs: into a folder of its own first, from which only the logger
-    files are taken. Names inside the archive never decide where a file is written."""
+    files are taken. Names inside the archive never decide where a file is written. The folder sits beside the
+    archive's own and has a short name: Windows allows a path 259 characters, and projects live deep."""
     _, exe, how = tool
-    with tempfile.TemporaryDirectory(prefix=".opening-", dir=out.parent) as tmp:
-        into = os.path.join(tmp, "files")
-        os.mkdir(into)
+    with tempfile.TemporaryDirectory(prefix=".u", dir=out.parent) as into:
         if how == "tar":
-            _tar_into(exe, archive, tmp, into, other)
+            _tar_into(exe, archive, into, other)
         elif how == "7z":
             code, listing, err = _run([exe, "l", "-slt", "-ba", "-p-", str(archive)])
             if code > 1:
@@ -368,10 +374,15 @@ def _folders(archives: list, base: Path) -> dict:
 
 
 def stem(archive: Path) -> str:
+    """The archive's name without its ending, fit for a folder name on any system, and short: a long name keeps its
+    first part and gets a mark of the whole (Windows allows a path 259 characters, and projects live deep)."""
     name = archive.name
     low = name.lower()
     suf = next(s for s in sorted(KINDS, key=len, reverse=True) if low.endswith(s))
-    return re.sub(r'[<>:"|?*\x00-\x1f]', "_", name[: -len(suf)]).rstrip(". ")[:80] or "archive"
+    full = re.sub(r'[<>:"|?*\x00-\x1f]', "_", name[: -len(suf)]).rstrip(". ") or "archive"
+    if len(full) <= STEM_MAX:
+        return full
+    return full[: STEM_MAX - 7].rstrip("._- ") + "~" + hashlib.sha1(full.encode("utf-8")).hexdigest()[:6]  # noqa: S324
 
 
 def unpack(archives: list, base, dest, log=print, keep=None) -> dict:

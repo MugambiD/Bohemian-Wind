@@ -141,6 +141,8 @@ def build(project, log=print) -> dict:
                              ((env or {}).get("flicker_map_print"), "map_shadow_flicker.png", "Shadow flicker screening map"),
                              ((env or {}).get("noise_csv"), "noise_at_homes.csv", "Noise level at each home against the limit"),
                              ((env or {}).get("flicker_csv"), "shadow_flicker_at_homes.csv", "Worst-case shadow flicker at each home"),
+                             ("layout/beyond_radius.csv" if lay.get("beyond_radius") else None, "turbines_left_out.csv",
+                              "Turbine positions given but left out: too far from the mast for its data to stand for them"),
                              (((env or {}).get("not_assessed") or {}).get("csv"), "homes_not_assessed.csv",
                               "Homes outside the terrain of the wind map: not assessed for noise or shadow flicker")):
         if rel and (project.folder / rel).is_file():

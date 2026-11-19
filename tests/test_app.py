@@ -169,11 +169,37 @@ def test_a_layout_of_your_own_is_taken_as_given(project, tmp_path):
     assert any("outside the buildable area" in w and "At a home" in w for w in res["warnings"])
     page = (p.folder / p.run("pack", log=quiet)["index"]).read_text(encoding="utf-8")
     assert "Check before relying on these figures" in page and "At a home" in page      # the pack carries the warning
-    # a position off the map stops the run with a message that says what to do
+    # a position beyond the search radius is left out, named, and listed; the rest is worked out
     own.write_text(f"name,lat,lon\nA1,{good['lat']:.6f},{good['lon']:.6f}\nFar away,{good['lat'] + 1:.6f},{good['lon']:.6f}\n", encoding="utf-8")
     p.attach("positions", own)
-    with pytest.raises(ProjectError, match="1 of the 2 turbine positions given lies outside the mapped area"):
+    said = []
+    res = p.run("layout", log=said.append)
+    assert res["n_placed"] == 1 and [q["id"] for q in res["positions"]] == ["A1"]
+    assert [b["name"] for b in res["beyond_radius"]] == ["Far away"] and res["beyond_radius"][0]["dist_mast_km"] > 100
+    r_km = res["rules"]["radius_km"]
+    assert any(w.startswith(f"1 of the 2 turbine positions given lies more than {r_km:g} km from the mast") and "is left out" in w
+               for w in res["warnings"])
+    assert (p.folder / "layout" / "beyond_radius.csv").read_text(encoding="utf-8").splitlines()[1].startswith("Far away,")
+    assert any("1 more lies farther out" in line for line in said)
+    pack = p.run("pack", log=quiet)
+    assert (p.folder / pack["folder"] / "turbines_left_out.csv").is_file()
+    # none within the radius: the run stops and says what to do
+    own.write_text(f"name,lat,lon\nFar away,{good['lat'] + 1:.6f},{good['lon']:.6f}\n", encoding="utf-8")
+    p.attach("positions", own)
+    with pytest.raises(ProjectError, match=f"The turbine position given does not lie within {r_km:g} km of the mast"):
         p.run("layout", log=quiet)
+    # WindPRO writes every turbine twice, as the turbine and as its symbol: each is counted once, by its name
+    kml = "".join(f"<Placemark><description>Symbol for: turbine {i}</description><Point><coordinates>{q['lon']:.7f},{q['lat']:.7f},0"
+                  f"</coordinates></Point></Placemark><Placemark><name>{i}</name><Point><coordinates>{q['lon']:.7f},{q['lat']:.7f},0"
+                  "</coordinates></Point></Placemark>" for i, q in enumerate(designed["positions"][:3], 1))
+    (tmp_path / "windpro.kml").write_text(f'<?xml version="1.0"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document>{kml}</Document></kml>',
+                                          encoding="utf-8")
+    p.attach("positions", tmp_path / "windpro.kml")
+    said = []
+    res = p.run("layout", log=said.append)
+    assert res["n_placed"] == 3 and [q["id"] for q in res["positions"]] == ["1", "2", "3"] and res["beyond_radius"] == []
+    assert any("holds 6 points for 3 turbines" in line for line in said)
+    assert any("the 3 that stood twice in it were counted once" in n for n in res["notes"])
     # removing the file brings the designed layout back
     p.update("layout", {"positions_file": "", "n_turbines": designed["n_requested"]})
     res = p.run("layout", log=quiet)
