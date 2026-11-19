@@ -223,8 +223,9 @@ ul.findings li::before { background: var(--warning); }
 .ladder .stale .n { border-color: var(--warning); color: var(--warning); }
 .ladder b { display: block; font-size: 15.5px; }
 .ladder span.sum { display: block; color: var(--ink-2); font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.start { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
-.recent { display: grid; gap: 8px; }
+.start { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 18px; }
+.start > * { min-width: 0; }
+.recent { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }   /* a long folder path is cut short, not widening the page */
 .recent button { all: unset; box-sizing: border-box; cursor: pointer; display: block; width: 100%; padding: 9px 12px; border: 1px solid var(--line); border-radius: 7px; }
 .recent button:hover { border-color: var(--line-strong); background: var(--raised); }
 .recent b { display: block; font-size: 14px; }

@@ -29,7 +29,7 @@ Six steps, in order. Each screen asks for what it needs on the left and shows wh
 
 ## Where each part stands
 
-Honest status of this version (0.2.1-dev). "Working" means it runs end to end and is covered by tests with known answers; it does not mean validated against measurements.
+Honest status of this version (0.2.2-dev). "Working" means it runs end to end and is covered by tests with known answers; it does not mean validated against measurements.
 
 | Capability | State |
 |---|---|
