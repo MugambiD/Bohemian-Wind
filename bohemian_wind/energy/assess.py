@@ -73,10 +73,14 @@ def design(field: WindField, clim: dict, mask: np.ndarray, turbine: Turbine, n_t
            cross_d: float = 3.0, along_d: float = 7.0, link_m: float | None = 2500.0, wake: str = "niayifar",
            refine: bool = True, refine_seconds: float = 90.0, losses=None, speed_uncertainty: dict | None = None,
            energy_uncertainty: dict | None = None, iav_speed: float = budget.DEFAULT_IAV_SPEED,
-           fixed_xy=None, mast_xy=(0.0, 0.0), top_m: float | None = None, log=lambda m: None) -> dict:
+           fixed_xy=None, mast_xy=(0.0, 0.0), top_m: float | None = None, profile_clean: bool = True,
+           long_term: dict | None = None, log=lambda m: None) -> dict:
     """field: wind field at the hub height (bohemian_wind.flow.fields.wind_field with the same climate, factor and
     shear). mask: buildable cells. fixed_xy: (x, y) arrays to evaluate a given layout instead of designing one.
-    top_m: height of the top anemometer (default: the climate's height), for the vertical extrapolation term."""
+    top_m: height of the top anemometer (default: the climate's height), for the vertical extrapolation term.
+    profile_clean: False when the measured wind profile is not clean (climate's shear warning): the vertical term
+    grows faster with height. long_term: {"pct", "corrected", "basis"} from budget.long_term_pct for the campaign
+    (None: the default long-term terms)."""
     if abs(field.height_m - turbine.hub_m) > 0.5:
         raise EnergyError(f"The wind field is at {field.height_m:g} m but the hub height is {turbine.hub_m:g} m.")
     if wake not in wakes.WAKE_MODELS:
@@ -165,6 +169,8 @@ def design(field: WindField, clim: dict, mask: np.ndarray, turbine: Turbine, n_t
     lat, lon = grid.to_latlon(x, y)
     free_ws, ground = at(field.mean_ws, x, y), at(grid.elev, x, y)
     slope = grid.slope_at(x, y) if exact else at(grid.slope_pct, x, y)
+    steep_mast = float(grid.steep_share_round(*mast_xy, budget.STEEP_RADIUS_M, budget.STEEP_LIMIT_PCT)[0])
+    steep = grid.steep_share_round(x, y, budget.STEEP_RADIUS_M, budget.STEEP_LIMIT_PCT)
     positions = []
     for j in range(n):
         positions.append({
@@ -174,12 +180,15 @@ def design(field: WindField, clim: dict, mask: np.ndarray, turbine: Turbine, n_t
             "free_ws": float(free_ws[j]), "ratio_to_mast": float(free_ws[j] / field.mast_mean_ws),
             "gross_mwh": float(gross[j]), "wake_loss_pct": float(100 * (1 - net[j] / gross[j])),
             "after_wake_mwh": float(net[j]), "p50_mwh": float(net[j] * other),
-            "capacity_factor": float(net[j] * other / (turbine.rated_kw / 1000.0 * wakes.HOURS))})
+            "capacity_factor": float(net[j] * other / (turbine.rated_kw / 1000.0 * wakes.HOURS)),
+            "steep_share_pct": None if np.isnan(steep[j]) else round(float(steep[j]), 1),
+            "complex_terrain": budget.is_complex(steep_mast, None if np.isnan(steep[j]) else float(steep[j]))})
     # the uncertainty of carrying the mast's wind to where each turbine stands, then the budget of the whole farm
     if speed_uncertainty is None:
         top = float(clim["height_m"] if top_m is None else top_m)
-        ext, each = budget.extrapolation_terms(positions, [q["p50_mwh"] for q in positions], turbine.hub_m, top)
-        speed_terms = {**budget.DEFAULT_SPEED_UNCERTAINTY, **ext}
+        ext, each = budget.extrapolation_terms(positions, [q["p50_mwh"] for q in positions], turbine.hub_m, top,
+                                               profile_clean)
+        speed_terms = {**budget.speed_terms_for(long_term), **ext}
         rest = sum(v * v for k, v in speed_terms.items() if k != budget.HORIZONTAL)
         energy_rest = sum(v * v for v in e_terms.values())
         for q, h in zip(positions, each):
@@ -188,15 +197,41 @@ def design(field: WindField, clim: dict, mask: np.ndarray, turbine: Turbine, n_t
     else:
         speed_terms = speed_uncertainty
     unc = budget.uncertainty(res["p50_gwh"], energy_per_speed, speed_terms, e_terms, iav_speed)
+    n_complex = sum(1 for q in positions if q["complex_terrain"])
     if speed_uncertainty is None:
         unc["by_position"] = {"rule": {"base_pct": budget.H_BASE_PCT, "per_km_pct": budget.H_PER_KM_PCT,
                                        "per_50m_height_pct": budget.H_PER_50M_PCT, "share_of_speed_up": budget.H_SPEEDUP_SHARE,
-                                       "vertical_base_pct": budget.V_BASE_PCT, "vertical_per_10m_pct": budget.V_PER_10M_PCT},
+                                       "vertical_base_pct": budget.V_BASE_PCT,
+                                       "vertical_per_10m_pct": budget.V_PER_10M_PCT if profile_clean else budget.V_PER_10M_UNCLEAN_PCT,
+                                       "steep_limit_pct": budget.STEEP_LIMIT_PCT, "steep_radius_m": budget.STEEP_RADIUS_M,
+                                       "complex_share_pct": budget.COMPLEX_SHARE_PCT, "complex_factor": budget.H_COMPLEX_FACTOR},
                               "horizontal_pct_ws": ext[budget.HORIZONTAL], "vertical_pct_ws": ext[budget.VERTICAL],
-                              "top_m": top, "hub_m": turbine.hub_m,
-                              "horizontal_range_pct_ws": [round(min(each), 2), round(max(each), 2)]}
+                              "top_m": top, "hub_m": turbine.hub_m, "profile_clean": bool(profile_clean),
+                              "horizontal_range_pct_ws": [round(min(each), 2), round(max(each), 2)],
+                              "steep_share_mast_pct": round(steep_mast, 1), "turbines_complex": n_complex,
+                              "long_term_pct_ws": speed_terms.get(budget.LONG_TERM),
+                              "long_term_basis": (long_term or {}).get("basis", ""),
+                              "reference_pct_ws": speed_terms.get(budget.REFERENCE)}
+        if not profile_clean and turbine.hub_m > top:
+            notes.append(f"The measured wind profile is not clean (see the shear warning), so carrying the wind from the top "
+                         f"anemometer at {top:g} m to the {turbine.hub_m:g} m hub is taken as {budget.V_BASE_PCT:g} % plus "
+                         f"{budget.V_PER_10M_UNCLEAN_PCT:g} % per 10 m ({ext[budget.VERTICAL]:.1f} % of the wind speed), not "
+                         f"{budget.V_PER_10M_PCT:g} % per 10 m.")
+        if long_term and long_term.get("basis"):
+            notes.append(f"Long-term uncertainty {speed_terms[budget.LONG_TERM]:g} % of the wind speed: {long_term['basis']}.")
     hi = max(p["ratio_to_mast"] for p in positions)
     cautions = []
+    if n_complex:
+        where = ("round the mast" if budget.is_complex(steep_mast) else
+                 f"round {n_complex} of the {n} turbine{'s' if n > 1 else ''}")
+        worst = max([steep_mast] + [q["steep_share_pct"] or 0.0 for q in positions])
+        cautions.append(
+            f"Complex terrain {where}: up to {worst:.0f} % of the ground within {budget.STEEP_RADIUS_M / 1000:g} km is steeper "
+            f"than {budget.STEEP_LIMIT_PCT:g} % (17 degrees). The wind map is a linear screening model and is outside its range "
+            f"there; such models can misjudge the wind between points a few kilometres apart by far more than the screening rule allows. "
+            f"The horizontal uncertainty of {'every turbine' if n_complex == n else f'those {n_complex} turbines'} is multiplied by "
+            f"{budget.H_COMPLEX_FACTOR:g}. Before relying on the wind at the turbine positions, have an independent flow study "
+            "(for example CFD) made by an independent assessor.")
     if ceiling["change_pct"] < -CEILING_CAUTION_PCT:
         cautions.append(f"{-ceiling['change_pct']:.0f} % of the P50 rests on turbine positions being windier than the mast "
                         f"according to the wind map (the windiest by {100 * (hi - 1):.0f} %). With no position windier than "

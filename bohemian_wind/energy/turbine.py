@@ -46,10 +46,11 @@ PRESETS = {
 G, R_DRY, LAPSE = 9.80665, 287.05, 0.0065    # m/s2; J/(kg K), dry air; K/m, the standard lapse rate
 
 
-def reference_density(elevation_m: float, height_m: float, air: dict) -> float | None:
-    """Air density at height_m above a site at elevation_m, from a reanalysis cell's long-term mean temperature at
-    2 m and surface pressure (air: {"t2m_c", "ps_kpa", "elevation_m"}, the cell's own elevation). The temperature
-    is carried to the site with the standard lapse rate and the pressure with the hypsometric equation. Dry air."""
+def reference_air_at(elevation_m: float, height_m: float, air: dict) -> tuple | None:
+    """(pressure in Pa, temperature in K) at height_m above a site at elevation_m, from a reanalysis cell's long-term
+    mean temperature at 2 m and surface pressure (air: {"t2m_c", "ps_kpa", "elevation_m"}, the cell's own
+    elevation). The temperature is carried to the site with the standard lapse rate and the pressure with the
+    hypsometric equation."""
     try:
         t_cell, p_cell, z_cell = float(air["t2m_c"]) + 273.15, float(air["ps_kpa"]) * 1000.0, float(air["elevation_m"])
     except (KeyError, TypeError, ValueError):
@@ -58,8 +59,48 @@ def reference_density(elevation_m: float, height_m: float, air: dict) -> float |
     t_site = t_cell - LAPSE * (z - z_cell - 2.0)
     if t_site < 180.0 or p_cell <= 0:
         return None
-    p_site = p_cell * math.exp(-G * (z - z_cell) / (R_DRY * 0.5 * (t_cell + t_site)))
-    return p_site / (R_DRY * t_site)
+    return p_cell * math.exp(-G * (z - z_cell) / (R_DRY * 0.5 * (t_cell + t_site))), t_site
+
+
+def reference_density(elevation_m: float, height_m: float, air: dict) -> float | None:
+    """Air density at height_m above a site at elevation_m from the reanalysis air (see reference_air_at). Dry air."""
+    at = reference_air_at(elevation_m, height_m, air)
+    return None if at is None else at[0] / (R_DRY * at[1])
+
+
+POSITION_PRESSURE_HPA = 10.0   # a barometer further than this from the reanalysis air at the ground of the given
+                               # coordinates (about 100 m of height) is flagged. Set from in-house tests on measured
+                               # masts (not published).
+
+
+def position_check(measured_hpa: float | None, valid_pct: float | None, sensor_height_m: float | None,
+                   ground_m: float | None, air: dict | None, min_valid_pct: float = 25.0) -> dict | None:
+    """The mast's own barometer against the pressure the reanalysis air gives at the ground of the coordinates
+    entered (terrain model) plus the sensor's height. A large difference says the mast stands higher or lower than
+    the coordinates put it, or that the barometer is off. None when there is nothing to compare."""
+    if measured_hpa is None or ground_m is None or not air or (valid_pct or 0.0) < min_valid_pct:
+        return None
+    h = float(sensor_height_m) if sensor_height_m is not None else 0.0
+    at = reference_air_at(float(ground_m), h, air)
+    if at is None or not 300.0 < float(measured_hpa) < 1100.0:
+        return None
+    expected = at[0] / 100.0
+    diff = float(measured_hpa) - expected
+    rise = -R_DRY * at[1] / G * math.log(float(measured_hpa) / expected)     # m the barometer stands above where it is put
+    res = {"measured_hpa": round(float(measured_hpa), 1), "expected_hpa": round(expected, 1), "difference_hpa": round(diff, 1),
+           "height_offset_m": round(rise), "ground_m": round(float(ground_m), 1), "sensor_height_m": h,
+           "sensor_height_known": sensor_height_m is not None, "tolerance_hpa": POSITION_PRESSURE_HPA,
+           "reference": air.get("source") or "reanalysis", "caution": ""}
+    if abs(diff) > POSITION_PRESSURE_HPA:
+        res["caution"] = (
+            f"The mast's barometer reads {float(measured_hpa):.0f} hPa on average. The reanalysis air ({res['reference']}) carried to "
+            f"the ground at the coordinates entered ({float(ground_m):,.0f} m on the terrain model) plus the sensor's {h:g} m"
+            + ("" if sensor_height_m is not None else " (its height is not known: taken as the ground)")
+            + f" gives {expected:.0f} hPa. {abs(diff):.0f} hPa is about {abs(rise):,.0f} m of height: the mast seems to stand "
+            f"{'lower' if rise < 0 else 'higher'} than the ground at those coordinates. Check the coordinates against the "
+            "installation record (on sloping ground a mast a few hundred metres out changes the wind map a great deal), and "
+            "the barometer's height and calibration, before relying on the wind map and the layout.")
+    return res
 
 
 def air_density(elevation_m: float | None, height_m: float, measured: float | None = None,

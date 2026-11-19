@@ -332,6 +332,7 @@ def air_density(ds: Dataset, qc: dict, sensors: list[Sensor]) -> dict:
         if p_s.units.lower() == "kpa":
             p = p * 10.0
     measured = float(p.notna().mean() * 100.0)
+    p_own = float(p.mean()) if p.notna().any() else None          # the barometer's own mean, before any filling
     if p0 is not None:
         p = p.fillna(p0)
     elif p.notna().sum() == 0:
@@ -358,7 +359,9 @@ def air_density(ds: Dataset, qc: dict, sensors: list[Sensor]) -> dict:
         rho = (p * 100.0) / (R_DRY * tk)
     return {"rho": rho, "mean": float(rho.mean()), "monthly": rho.groupby(rho.index.to_period("M")).mean(),
             "t_monthly": t.groupby(t.index.to_period("M")).agg(["mean", "min", "max"]),
-            "estimated": estimated, "note": note, "sensor_height": t_s.height}
+            "estimated": estimated, "note": note, "sensor_height": t_s.height,
+            "pressure_mean": p_own, "pressure_pct": measured if p_s is not None else 0.0,
+            "pressure_height": p_s.height if p_s is not None else None, "temperature_mean": float(t.mean())}
 
 
 def sensor_table(ds: Dataset, qc: dict, sensors: list[Sensor]) -> pd.DataFrame:

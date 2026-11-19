@@ -185,6 +185,75 @@ def test_the_uncertainty_of_carrying_the_wind_depends_on_where_each_turbine_stan
     assert terms[budget.VERTICAL] == 2.0
 
 
+def test_the_long_term_term_follows_what_the_campaign_covers():
+    assert budget.long_term_pct(12)[0] == 3.0 and budget.long_term_pct(9)[0] == 6.0 and budget.long_term_pct(6)[0] == 6.0
+    assert budget.long_term_pct(5)[0] == 10.0 and budget.long_term_pct(None)[0] == 10.0
+    assert "only 9 of the twelve" in budget.long_term_pct(9)[1]
+    assert budget.long_term_pct(12, corrected=False, months=12)[0] == pytest.approx(6.0)               # one year: year-to-year wind
+    assert budget.long_term_pct(12, corrected=False, months=48)[0] == pytest.approx(3.0)               # 6 / sqrt(4)
+    assert budget.long_term_pct(12, corrected=False, months=200)[0] == 3.0                             # never below a full year corrected
+    assert budget.long_term_pct(8, corrected=False)[0] == 12.0 and budget.long_term_pct(3, corrected=False)[0] == 20.0
+    on = budget.speed_terms_for({"pct": 6.0, "corrected": True})
+    assert on[budget.LONG_TERM] == 6.0 and on[budget.REFERENCE] == budget.REFERENCE_PCT
+    off = budget.speed_terms_for({"pct": 12.0, "corrected": False})
+    assert off[budget.LONG_TERM] == 12.0 and budget.REFERENCE not in off                               # no reference to doubt
+    assert budget.speed_terms_for(None) == budget.DEFAULT_SPEED_UNCERTAINTY
+
+
+def test_an_unclean_profile_and_complex_terrain_widen_the_extrapolation_terms():
+    assert budget.vertical_pct(120.0, 80.0, clean_profile=False) == pytest.approx(1.0 + 2.5 * 4)
+    assert budget.vertical_pct(80.0, 80.0, clean_profile=False) == 1.0                                 # within the heights measured
+    assert budget.horizontal_pct(4.0, 0.0, 1.0, complex_terrain=True) == pytest.approx(3 * math.hypot(2.0, 4.0))
+    assert not budget.is_complex(2.0, None, 10.0) and budget.is_complex(2.0, 10.5)
+    a = {"dist_mast_km": 1.0, "dz_m": 0.0, "ratio_to_mast": 1.0}
+    b = {**a, "complex_terrain": True}
+    terms, each = budget.extrapolation_terms([a, b], [1.0, 1.0], 120.0, 80.0, clean_profile=False)
+    assert each == pytest.approx([math.hypot(2, 1), 3 * math.hypot(2, 1)]) and terms[budget.VERTICAL] == 11.0
+
+
+def test_steep_ground_round_a_point():
+    flat = tr.from_function(lambda x, y: 1000.0 + 0 * x, 0.0, 30.0, half_km=5, res=100)
+    assert flat.steep_share_round(0.0, 0.0)[0] == 0.0
+    ramp = tr.from_function(lambda x, y: 1000.0 + 0.5 * x, 0.0, 30.0, half_km=5, res=100)               # 50 % everywhere
+    assert ramp.steep_share_round([0.0, 2000.0], [0.0, 0.0]) == pytest.approx([100.0, 100.0])
+    cliff = tr.from_function(lambda x, y: 1000.0 + 0.5 * np.maximum(x, 0.0), 0.0, 30.0, half_km=5, res=100)
+    assert 40.0 < cliff.steep_share_round(0.0, 0.0)[0] < 60.0                                             # steep east half only
+    assert cliff.steep_share_round(-4500.0, 0.0, radius_m=500.0)[0] == 0.0
+
+
+def test_the_barometer_checks_where_the_mast_stands():
+    from bohemian_wind.energy.turbine import position_check, reference_air_at
+    air = {"t2m_c": 22.0, "ps_kpa": 87.0, "elevation_m": 1300.0, "source": "test reanalysis"}
+    expected = reference_air_at(1500.0, 10.0, air)[0] / 100.0
+    ok = position_check(expected + 3.0, 98.0, 10.0, 1500.0, air)
+    assert ok["caution"] == "" and ok["difference_hpa"] == pytest.approx(3.0, abs=0.05) and abs(ok["height_offset_m"]) < 40
+    off = position_check(expected + 20.0, 98.0, 10.0, 1500.0, air)                                     # sits ~200 m lower
+    assert off["caution"] and "lower" in off["caution"] and -260 < off["height_offset_m"] < -160
+    high = position_check(expected - 15.0, 98.0, None, 1490.0, air)
+    assert "higher" in high["caution"] and "not known" in high["caution"]
+    assert position_check(expected, 10.0, 10.0, 1500.0, air) is None                                   # too few valid records
+    assert position_check(expected, 98.0, 10.0, 1500.0, None) is None                                  # no reanalysis air
+
+
+def test_a_layout_in_complex_terrain_says_so_and_is_less_certain():
+    c = climate()
+    flat = flat_field(c, half_km=6)
+    g = tr.from_function(lambda x, y: 1500.0 + 0.4 * np.abs(x), -1.5, 36.5, half_km=6, res=100)        # a V-shaped valley, 40 % sides
+    steep = fields.wind_field(g, c, T.hub_m, "linear")
+    xy = ([1000.0, 2000.0], [0.0, 1000.0])
+    a = assess.design(flat, c, None, T, 2, rho_hub=1.0, fixed_xy=xy)
+    b = assess.design(steep, c, None, T, 2, rho_hub=1.0, fixed_xy=xy)
+    assert a["uncertainty"]["by_position"]["turbines_complex"] == 0 and not any("Complex terrain" in w for w in a["cautions"])
+    assert b["uncertainty"]["by_position"]["turbines_complex"] == 2 and all(q["complex_terrain"] for q in b["positions"])
+    assert any("Complex terrain round the mast" in w and "independent" in w for w in b["cautions"])
+    lt = {"pct": 6.0, "corrected": True, "basis": "test basis"}
+    u = assess.design(flat, c, None, T, 2, rho_hub=1.0, fixed_xy=xy, profile_clean=False, long_term=lt)
+    bp = u["uncertainty"]["by_position"]
+    assert bp["profile_clean"] is False and bp["rule"]["vertical_per_10m_pct"] == 2.5 and bp["long_term_pct_ws"] == 6.0
+    assert u["uncertainty"]["sigma_pct"]["long_term"] > a["uncertainty"]["sigma_pct"]["long_term"]
+    assert any("not clean" in n for n in u["notes"]) and any("test basis" in n for n in u["notes"])
+
+
 def test_a_layout_farther_from_the_mast_is_less_certain():
     c = climate()
     wf = flat_field(c, half_km=9)

@@ -105,6 +105,25 @@ class Grid:
         gy = (self.sample(x, y + h) - self.sample(x, y - h)) / (2 * h)
         return 100.0 * np.hypot(gx, gy)
 
+    def steep_share_round(self, x, y, radius_m: float = 3500.0, limit_pct: float = 30.0) -> np.ndarray:
+        """Per cent of the ground within radius_m of each point that is steeper than limit_pct, counting the cells of
+        the grid that fall within the circle (a point near the edge is judged on the part of the circle mapped). A
+        screening measure of how complex the terrain round a mast or a turbine is."""
+        xs, ys = np.atleast_1d(np.asarray(x, dtype=float)), np.atleast_1d(np.asarray(y, dtype=float))
+        steep = self.slope_pct > limit_pct
+        out = np.full(xs.shape, np.nan)
+        for i, (px, py) in enumerate(zip(xs, ys)):
+            cols = np.flatnonzero(np.abs(self.x - px) <= radius_m)
+            rows = np.flatnonzero(np.abs(self.y - py) <= radius_m)
+            if not len(cols) or not len(rows):
+                continue
+            dx = self.x[cols][None, :] - px
+            dy = self.y[rows][:, None] - py
+            disk = dx * dx + dy * dy <= radius_m * radius_m
+            if disk.any():
+                out[i] = 100.0 * float(steep[rows[0]:rows[-1] + 1, cols[0]:cols[-1] + 1][disk].mean())
+        return out
+
     def mesh(self) -> tuple:
         return np.meshgrid(self.x, self.y)
 

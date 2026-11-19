@@ -492,6 +492,45 @@ class Project:
                             "run step 2 again to check the wind direction with the new correction.")
         return out + cautions
 
+    def site_checks(self, grid, clim: dict) -> tuple:
+        """Two checks of where the mast stands, from the terrain: its barometer against the reanalysis air at the
+        ground of the coordinates entered, and how steep the ground round it is. ({...}, warnings)."""
+        from .energy import budget  # noqa: PLC0415
+        from .energy.turbine import position_check  # noqa: PLC0415
+        d = clim.get("density") or {}
+        ground = float(grid.sample(0.0, 0.0))
+        pos = position_check(d.get("pressure_hpa"), d.get("pressure_valid_pct"), d.get("pressure_sensor_height_m"), ground,
+                             (self.result("longterm") or {}).get("reference_air"))
+        steep = float(grid.steep_share_round(0.0, 0.0, budget.STEEP_RADIUS_M, budget.STEEP_LIMIT_PCT)[0])
+        info = {"position_check": pos, "steep_share_mast_pct": round(steep, 1), "complex_terrain": budget.is_complex(steep)}
+        if pos is None and d.get("pressure_hpa") is None and d.get("mean") is not None and "pressure_valid_pct" not in d:
+            info["position_check_note"] = "Run step 1 again to check the mast's position against its barometer."
+        out = [pos["caution"]] if pos and pos["caution"] else []
+        return info, out
+
+    def complex_warning(self, steep_pct: float) -> str:
+        from .energy import budget  # noqa: PLC0415
+        return (f"Complex terrain round the mast: {steep_pct:.0f} % of the ground within {budget.STEEP_RADIUS_M / 1000:g} km is steeper "
+                f"than {budget.STEEP_LIMIT_PCT:g} % (17 degrees). The wind map is a linear screening model and is outside its range "
+                "here; such models can misjudge the wind between points a few kilometres apart by far more than the screening rule allows. "
+                "The energy step multiplies the horizontal uncertainty of turbines here by "
+                f"{budget.H_COMPLEX_FACTOR:g}. Before relying on the wind away from the mast, have an independent flow study "
+                "(for example CFD) made by an independent assessor.")
+
+    def long_term_uncertainty(self, clim: dict) -> dict:
+        """The long-term term for this campaign (budget.long_term_pct): corrected or not, and how many calendar
+        months it covers."""
+        from .energy import budget  # noqa: PLC0415
+        lt = self.result("longterm") or {}
+        corrected = bool(lt.get("long_term"))
+        if corrected:
+            cal, months = lt.get("calendar_months"), lt.get("months")
+        else:
+            series = _climate.monthly_series(clim)
+            cal, months = len(set(series.index.month)), len(series)
+        pct, why = budget.long_term_pct(cal, corrected, months)
+        return {"pct": pct, "corrected": corrected, "basis": why}
+
     def turbine(self):
         from .energy.turbine import PRESETS, Turbine  # noqa: PLC0415
         L = self.s["layout"]
@@ -785,6 +824,16 @@ class Project:
                "credits": credits, "lt_factor": float((self.result("longterm") or {}).get("factor") or 1.0),
                "annual_mean_ws": scale["mean_ws"], "annual_mean_height_m": clim["height_m"],
                "climate_scale": scale["scale"], "warnings": self.warnings(clim) + list(wf.cautions)}
+        checks, more = self.site_checks(wf.grid, clim)
+        out.update(checks)
+        out["warnings"] += more + ([self.complex_warning(checks["steep_share_mast_pct"])] if checks["complex_terrain"] else [])
+        pc = checks["position_check"]
+        if pc and not pc["caution"]:
+            out["notes"].append(f"Mast position checked against its barometer: {pc['measured_hpa']:.0f} hPa measured, "
+                                f"{pc['expected_hpa']:.0f} hPa from the reanalysis air at the ground of the coordinates entered "
+                                f"(difference {pc['difference_hpa']:+.1f} hPa, within {pc['tolerance_hpa']:g}).")
+        elif checks.get("position_check_note"):
+            out["notes"].append(checks["position_check_note"])
         log(f"Wind map at {height:g} m: {out['min_ws']:.1f} to {out['max_ws']:.1f} m/s; {wf.mast_mean_ws:.2f} m/s at the mast.")
         return self._store("map", out)
 
@@ -870,13 +919,17 @@ class Project:
                                 along_d=_num(L.get("along_d"), "Spacing along the wind", 1.5, 20),
                                 link_m=_num(L.get("link_m"), "Link distance", 0, 20000, True) or None,
                                 wake=L.get("wake") or "niayifar", refine=bool(L.get("refine")), refine_seconds=45.0,
-                                losses=L.get("losses"), top_m=clim.get("height_m"), log=log)
+                                losses=L.get("losses"), top_m=clim.get("height_m"),
+                                profile_clean=not (clim.get("shear") or {}).get("warning"),
+                                long_term=self.long_term_uncertainty(clim), log=log)
         except EnergyError as e:
             raise ProjectError(str(e)) from e
         res["notes"] = res["notes"] + [n[0].upper() + n[1:] + "." for n in (f_note, a_note, self.vane_offset()[1]) if n] + (
             [scale["lean"]] if scale["lean"] else []) + [f"Air density at hub height {rho:.3f} kg/m3 ({rho_src})."]
         res["annual_mean_ws"], res["annual_mean_height_m"], res["climate_scale"] = scale["mean_ws"], clim["height_m"], scale["scale"]
-        res["warnings"] = self.warnings(clim) + list(wf.cautions) + list(res.pop("cautions", []))
+        checks, more = self.site_checks(grid, clim)
+        res["position_check"] = checks["position_check"]
+        res["warnings"] = self.warnings(clim) + list(wf.cautions) + more + list(res.pop("cautions", []))
         need = rules.radius_km + sb / 1000.0    # the setback rule looks this far from the mast
         edge = self.buildings_edge_m(grid, [-need * 1000.0, need * 1000.0], [-need * 1000.0, need * 1000.0])
         if edge is not None and edge < -1.0:
@@ -936,13 +989,15 @@ class Project:
             w.writerow(["id", "latitude", "longitude", "utm_zone", "easting_m", "northing_m", "ground_elevation_m",
                         "hub_height_m", "tip_height_m", "tip_elevation_amsl_m", "free_wind_speed_ms", "gross_mwh",
                         "wake_loss_pct", "net_p50_mwh", "capacity_factor", "distance_from_mast_km",
-                        "height_above_mast_ground_m", "horizontal_uncertainty_pct_of_wind", "uncertainty_pct_of_energy"])
+                        "height_above_mast_ground_m", "horizontal_uncertainty_pct_of_wind", "uncertainty_pct_of_energy",
+                        "steep_ground_within_3_5km_pct", "complex_terrain"])
             for p in res["positions"]:
                 w.writerow([p["id"], f"{p['lat']:.6f}", f"{p['lon']:.6f}", p["utm_zone"], p["easting"], p["northing"],
                             f"{p['ground_elev_m']:.1f}", turbine.hub_m, p["tip_height_m"], p["tip_amsl_m"],
                             f"{p['free_ws']:.2f}", f"{p['gross_mwh']:.0f}", f"{p['wake_loss_pct']:.2f}",
                             f"{p['p50_mwh']:.0f}", f"{p['capacity_factor']:.3f}", f"{p['dist_mast_km']:.2f}", f"{p['dz_m']:.0f}",
-                            p.get("horizontal_unc_pct", ""), p.get("sigma_energy_pct", "")])
+                            p.get("horizontal_unc_pct", ""), p.get("sigma_energy_pct", ""),
+                            "" if p.get("steep_share_pct") is None else p["steep_share_pct"], "yes" if p.get("complex_terrain") else "no"])
         np.savez_compressed(self.path("layout", "buildable.npz"), mask=mask)
         title = f"Layout: {res['n_placed']} x {turbine.name.replace('Generic ', '')}"
         sub = (f"{self.s['name']}: {res['capacity_mw']:.1f} MW, P50 {res['p50_gwh']:.0f} GWh a year "
