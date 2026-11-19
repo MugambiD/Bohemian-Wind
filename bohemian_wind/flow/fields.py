@@ -7,6 +7,9 @@ linear   Bohemian linear flow model (bohemian_wind.flow.linear): terrain speed-u
 atlas    Global Wind Atlas pattern: the atlas value at each cell over the atlas value at the mast (the same ratio
          for every direction). Needs GWA GeoTIFFs and the rasterio package. It keeps the atlas's own pattern,
          which was itself made with a linear model.
+cfd      Steady RANS per sector with OpenFOAM (bohemian_wind.flow.cfd), run beforehand and stored: the speed at
+         each cell over the speed at the mast at the same height. Resolves steep ground better than linear
+         theory, at hours rather than seconds of computing.
 
 The mast's sector wind climate (long-term corrected, carried to the height with the measured shear) times these
 ratios gives the wind at every cell. Both are screening tools.
@@ -26,7 +29,7 @@ from .. import climate as _climate
 from ..terrain import Grid
 from . import linear
 
-ENGINES = ("linear", "atlas")
+ENGINES = ("linear", "atlas", "cfd")
 RATIO_LIMITS = (0.4, 1.8)        # ratios outside this are not believable from either engine; they are clipped and counted
 VERSION = 2                  # of what a stored wind field holds: raise it and stored fields are worked out again
 MAST_SPREAD_LIMIT = 0.02     # atlas at its nearest grid point against interpolated to the mast: more apart is said
@@ -185,7 +188,7 @@ def atlas_ratio(grid: Grid, layers: dict, height_m: float, mast_xy=(0.0, 0.0)) -
 
 def wind_field(grid: Grid, clim: dict, height_m: float, engine: str = "linear", z0_m: float = 0.05,
                lt_factor: float = 1.0, alpha: float | None = None, gwa_dir=None, mast_xy=(0.0, 0.0),
-               keep_half_m: float | None = None, rotate_deg: float = 0.0) -> WindField:
+               keep_half_m: float | None = None, rotate_deg: float = 0.0, cfd_dir=None) -> WindField:
     """Wind at every cell of the grid at height_m, from the mast's wind climate. lt_factor multiplies the climate's
     speeds (climate.speed_scale: the long-term mean, or the seasonally balanced measured mean).
 
@@ -197,7 +200,34 @@ def wind_field(grid: Grid, clim: dict, height_m: float, engine: str = "linear", 
     if rotate_deg:
         centres = (centres + rotate_deg) % 360.0
     notes, cautions = [], []
-    if engine == "linear":
+    if engine == "cfd":
+        from . import cfd  # noqa: PLC0415
+        if cfd_dir is None or not (Path(cfd_dir) / "cfd.npz").is_file():
+            raise FlowError("No CFD run is stored for this map: run step 3 with the CFD engine first.")
+        speeds, heights, stored, meta = cfd.load(cfd_dir)
+        half = float(meta["core_half_m"])
+        if keep_half_m is not None and abs(half - keep_half_m) > 1.0:
+            raise FlowError("The stored CFD run covers another area than the map: run step 3 again.")
+        if len(stored) != len(centres) or np.max(np.abs((np.asarray(stored) - centres + 180.0) % 360.0 - 180.0)) > 0.5:
+            raise FlowError("The stored CFD run was made for other wind directions (sectors or vane correction): run step 3 again.")
+        grid = grid.crop(half)
+        if tuple(speeds.shape[2:]) != grid.shape:
+            raise FlowError("The stored CFD run was made on another terrain grid: run step 3 again.")
+        try:
+            ratio = cfd.ratios(speeds, heights, height_m, grid, mast_xy)
+        except cfd.CfdError as e:
+            raise FlowError(str(e)) from e
+        keep_half_m = None                                # already on the map area
+        bad = [i for i in meta.get("sectors") or [] if i and not i.get("stable", i.get("converged"))]
+        notes.append(f"CFD (OpenFOAM, steady RANS k-epsilon, neutral surface layer): terrain only, roughness length "
+                     f"{meta['settings']['z0_m']:g} m everywhere, {meta['settings']['cell_m']:g} m cells over the map, "
+                     f"{len(stored)} wind directions. No forest canopy, stability or Coriolis turning.")
+        notes.append(cfd.CREDIT)
+        if bad:
+            cautions.append(f"In {len(bad)} of the {len(stored)} wind directions the CFD solution was still moving when it reached the "
+                            "iteration limit (often behind steep ground, where the real flow is unsteady): their pattern is less "
+                            "certain. A finer or longer run may settle it.")
+    elif engine == "linear":
         ratio = linear_ratios(grid, centres, height_m, z0_m, mast_xy)
         notes.append(f"Bohemian linear flow model v{linear.__version__}: terrain only, roughness length {z0_m:g} m "
                      "everywhere. No roughness changes, obstacles, stability or flow separation.")
@@ -224,7 +254,7 @@ def wind_field(grid: Grid, clim: dict, height_m: float, engine: str = "linear", 
         ry, rx = grid.crop_slices(keep_half_m)
         grid, ratio = grid.crop(keep_half_m), ratio[:, ry, rx]
     steep = float((grid.slope_pct > STEEP_LIMIT_PCT).mean())
-    if steep > 0.02:
+    if steep > 0.02 and engine != "cfd":
         notes.append(f"{100 * steep:.0f} % of the area is steeper than {STEEP_LIMIT_PCT:.0f} % (17 degrees). "
                      + ("Linear flow models over-predict speed-ups on steep ground" if engine == "linear" else
                         "Neither the atlas nor a linear flow model resolves the wind on ground this steep")

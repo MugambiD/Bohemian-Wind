@@ -8,6 +8,8 @@ r"""Builds the Windows installer of Bohemian Wind. Run on 64-bit Windows with th
 
     python\                      this Python (python.org's build, with tcl/tk), told to see nothing outside the bundle
     python\Lib\site-packages\    the packages pinned in requirements.txt beside this file, and Bohemian Wind itself
+    openfoam\                    the OpenFOAM programs the CFD wind map runs as separate processes (GPL-3.0), their
+                                 libraries, OpenFOAM's etc folder, and its complete source code (openfoam\source)
     licenses\                    the licence of Bohemian Wind, of Python, of every package and of the libraries in them
     icon.ico, README.txt, BUILD.txt
 
@@ -40,6 +42,23 @@ MUST_IMPORT = ("tkinter", "_tkinter", "ssl", "sqlite3", "ctypes", "bohemian_wind
                "pandas", "matplotlib", "xarray", "py_wake", "h5py", "netCDF4", "rasterio", "openpyxl", "PIL")
 LICENCE_FILE = re.compile(r"(?i)(licen[cs]e|copying|notice|authors|copyright)")
 NOTICES = json.loads((HERE / "notices.json").read_text(encoding="utf-8"))
+
+
+# OpenFOAM for the CFD wind map: OpenCFD's own Windows build (cross-compiled with MinGW-w64), pinned by its hash, and
+# the source code it was built from, shipped beside it (GPL-3.0, section 6). Only what blockMesh and simpleFoam need is
+# taken; build.py checks that every library they load is there.
+OPENFOAM = {
+    "version": "v2606",
+    "windows": ("https://sourceforge.net/projects/openfoam/files/v2606/OpenFOAM-v2606-windows-mingw.exe/download",
+                "020321d58b42e1d2ad0b616cdde17f92503608edd902388fb8c73e94e9cb1e25"),
+    "source": ("https://dl.openfoam.com/source/v2606/OpenFOAM-v2606.tgz",
+               "2a1310e3ed192cc4c521e1d22dcc176f57bec61160c878dc4348f21d6672294d"),
+    "programs": ["blockMesh.exe", "simpleFoam.exe"],
+    # loaded at run time by name (controlDict "libs"), so not found by following the programs' imports
+    "loaded": ["libatmosphericModels.dll"],
+}
+WINDOWS_DLLS = {"kernel32.dll", "advapi32.dll", "msvcrt.dll", "user32.dll", "ws2_32.dll", "shell32.dll", "ole32.dll",
+                "psapi.dll", "dbghelp.dll", "bcrypt.dll", "ntdll.dll", "secur32.dll", "crypt32.dll"}
 
 
 class BuildError(SystemExit):
@@ -260,6 +279,129 @@ def collect_library_notices(bundle: Path, licenses: Path) -> list:
     return rows
 
 
+def pe_imports(path: Path) -> list:
+    """Names of the DLLs a Windows program or library imports (its import table), lower case."""
+    import struct  # noqa: PLC0415
+    b = Path(path).read_bytes()
+    pe = struct.unpack_from("<I", b, 0x3C)[0]
+    if b[pe:pe + 4] != b"PE\0\0":
+        raise BuildError(f"{path.name} is not a Windows program file.")
+    n_sec, opt_size = struct.unpack_from("<H", b, pe + 6)[0], struct.unpack_from("<H", b, pe + 20)[0]
+    opt = pe + 24
+    magic = struct.unpack_from("<H", b, opt)[0]
+    dd = opt + (112 if magic == 0x20B else 96)
+    imp_rva = struct.unpack_from("<I", b, dd + 8)[0]
+    secs = [struct.unpack_from("<8sIIII", b, opt + opt_size + 40 * i) for i in range(n_sec)]
+
+    def off(rva):
+        for _, vsize, vaddr, rsize, raw in secs:
+            if vaddr <= rva < vaddr + max(vsize, rsize):
+                return rva - vaddr + raw
+        raise BuildError(f"{path.name}: an address outside its sections.")
+
+    out, d = [], off(imp_rva) if imp_rva else None
+    while d is not None:
+        name_rva = struct.unpack_from("<I", b, d + 12)[0]
+        if not name_rva:
+            break
+        o = off(name_rva)
+        out.append(b[o:b.index(b"\0", o)].decode("ascii").lower())
+        d += 20
+    return out
+
+
+def fetch(url: str, sha256: str, dest: Path) -> Path:
+    """A download, kept between builds, checked against its pinned hash."""
+    import urllib.request  # noqa: PLC0415
+    if dest.is_file() and hashlib.sha256(dest.read_bytes()).hexdigest() == sha256:
+        return dest
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    say(f"   downloading {url}")
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "bohemian-wind-build"}), timeout=600) as r, \
+            open(dest, "wb") as fh:
+        shutil.copyfileobj(r, fh)
+    got = hashlib.sha256(dest.read_bytes()).hexdigest()
+    if got != sha256:
+        raise BuildError(f"{dest.name} is not the file this build was written for (SHA-256 {got}).")
+    return dest
+
+
+def seven_zip() -> str:
+    for c in (shutil.which("7z"), r"C:\Program Files\7-Zip\7z.exe", r"C:\Program Files (x86)\7-Zip\7z.exe"):
+        if c and Path(c).is_file():
+            return c
+    raise BuildError("7-Zip is needed to unpack OpenFOAM's Windows package.")
+
+
+def add_openfoam(bundle: Path, work: Path) -> list:
+    r"""OpenFOAM's programs and libraries into bundle\openfoam, its etc folder, its licence and its source code.
+    Returns the library file names taken."""
+    v = OPENFOAM["version"]
+    dl = work / "downloads"
+    exe = fetch(*OPENFOAM["windows"], dl / f"OpenFOAM-{v}-windows-mingw.exe")
+    src = fetch(*OPENFOAM["source"], dl / f"OpenFOAM-{v}.tgz")
+    un = work / "openfoam-unpacked"
+    shutil.rmtree(un, ignore_errors=True)
+    z = seven_zip()
+    run([z, "x", "-y", f"-o{un}", exe, "msys64.7z", "licenses"])
+    run([z, "x", "-y", f"-o{un / 'm'}", un / "msys64.7z", f"msys64/home/ofuser/OpenFOAM/OpenFOAM-{v}/platforms",
+         f"msys64/home/ofuser/OpenFOAM/OpenFOAM-{v}/etc", f"msys64/home/ofuser/OpenFOAM/OpenFOAM-{v}/LICENSE.md"])
+    root = un / "m" / "msys64" / "home" / "ofuser" / "OpenFOAM" / f"OpenFOAM-{v}"
+    binsrc = root / "platforms" / "win64MingwDPInt32Opt" / "bin"
+    have = {f.name.lower(): f for f in binsrc.iterdir() if f.is_file()}
+    have["libpstream.dll"] = binsrc / "libPstream.dll-dummy"          # serial runs: no MPI library needed
+    dest = bundle / "openfoam"
+    (dest / "bin").mkdir(parents=True)
+    taken, todo, missing = {}, [n.lower() for n in OPENFOAM["programs"] + OPENFOAM["loaded"]], set()
+    while todo:
+        n = todo.pop()
+        if n in taken:
+            continue
+        f = have.get(n)
+        if f is None:
+            raise BuildError(f"OpenFOAM's Windows package has no {n}.")
+        name = "libPstream.dll" if n == "libpstream.dll" else f.name
+        taken[n] = name
+        shutil.copyfile(f, dest / "bin" / name)
+        for d in pe_imports(f):
+            if d in have:
+                todo.append(d)
+            elif d not in WINDOWS_DLLS:
+                missing.add(d)
+    if missing:
+        raise BuildError("OpenFOAM's programs need libraries that are neither in its package nor part of Windows: "
+                         + ", ".join(sorted(missing)))
+    shutil.copytree(root / "etc", dest / "etc")
+    (dest / "VERSION").write_text(v, encoding="ascii")
+    (dest / "source").mkdir()
+    shutil.copyfile(src, dest / "source" / src.name)
+    shutil.copyfile(root / "LICENSE.md", dest / "COPYING.txt")                  # the GPL beside the programs as well
+    (dest / "README.txt").write_text(f"""OpenFOAM {v} for the CFD wind map of Bohemian Wind
+
+These are programs and libraries of OpenFOAM {v}, free software from OpenCFD Ltd (www.openfoam.com), taken unchanged
+from OpenCFD's own Windows package (OpenFOAM-{v}-windows-mingw.exe, cross-compiled with MinGW-w64), with OpenFOAM's
+etc folder. libPstream.dll is that package's serial variant (libPstream.dll-dummy), so that no MPI library is needed.
+
+Bohemian Wind runs blockMesh.exe and simpleFoam.exe as separate programs: it writes their input files and reads
+their output files. It contains none of OpenFOAM's code and is not linked with it.
+
+Licence: GNU General Public License, version 3 or (at your option) any later version; the text is in
+COPYING.txt beside this file. You may copy, change and pass on these programs under its terms.
+There is NO WARRANTY, to the extent permitted by law.
+
+Source code: the complete source code of OpenFOAM {v} is in the folder "source" beside this file
+({src.name}, SHA-256 {OPENFOAM['source'][1]}), and at {OPENFOAM['source'][0]}.
+How OpenCFD builds the Windows package: doc/Build.md and the MinGW cross-compilation notes in that source.
+
+The GCC runtime libraries (libstdc++-6.dll, libgcc_s_seh-1.dll) are under GPL-3.0 with the GCC Runtime Library
+Exception (..\\licenses\\libraries\\GCC-Runtime-Library-Exception.txt); libwinpthread-1.dll is from MinGW-w64; libz.dll
+is zlib.
+
+OpenFOAM(R) is a registered trade mark of OpenCFD Ltd. Bohemian Wind is not approved or endorsed by OpenCFD Ltd.
+""", encoding="utf-8", newline="\r\n")
+    return sorted(taken.values())
+
+
 def write_readme(bundle: Path, version: str) -> None:
     notice = about()[1]
     (bundle / "README.txt").write_text(f"""Bohemian Wind {version}
@@ -281,7 +423,8 @@ If something goes wrong, the messages are in the file app.log in the folder .boh
 
 Licences: Bohemian Wind is under the MIT licence (licenses\\Bohemian-Wind-LICENSE.txt). It comes with Python and
 open-source packages under their own licences; all of them are in the folder "licenses" (start with PACKAGES.txt
-and LIBRARIES.txt).
+and LIBRARIES.txt). The CFD wind map runs OpenFOAM, free software under the GNU General Public License v3, as
+separate programs: they, their licence and their complete source code are in the folder "openfoam" (README.txt).
 
 Source and help: https://github.com/MugambiD/bohemian-wind.
 """, encoding="utf-8", newline="\r\n")
@@ -302,12 +445,15 @@ def build_bundle(work: Path, commit: str) -> None:
     say("2. Packages")
     site = python_dir / "Lib" / "site-packages"
     install_packages(site, work)
+    say("2b. OpenFOAM for the CFD wind map")
+    of_files = add_openfoam(bundle, work)
+    say(f"   {len(of_files)} files: " + ", ".join(of_files))
     say("3. What the bundle's own Python sees")
     seen = probe(python_dir / "python.exe", bundle)
     say("   " + ", ".join(f"{m} {v[0]}" for m, v in seen["modules"].items() if v[0]) + f", Tcl {seen['tcl']}")
     say("4. Licences")
     licenses = bundle / "licenses"
-    licenses.mkdir()
+    licenses.mkdir(exist_ok=True)
     shutil.copyfile(REPO / "LICENSE", licenses / "Bohemian-Wind-LICENSE.txt")
     shutil.copyfile(REPO / "THIRD_PARTY_NOTICES.md", licenses / "THIRD_PARTY_NOTICES.md")
     shutil.copyfile(python_dir / "LICENSE.txt", licenses / "Python-LICENSE.txt")

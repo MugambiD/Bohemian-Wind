@@ -41,6 +41,7 @@ no administrator rights, no Python to install first, no internet needed.
 | Python | python.org's own build for Windows, with its signature checked when the setup program is built. A file beside it (`python3XX._pth`) makes it look nowhere outside its folder: not at another Python on the computer, not at `PYTHONPATH`, not at packages you installed for yourself |
 | Packages | The versions pinned in [`packaging/windows/requirements.txt`](../packaging/windows/requirements.txt): the ones the tests were run with. PyWake and rasterio are in, so both wind-map methods and the energy step work as installed |
 | Bohemian Wind | Built from the commit named in `BUILD.txt` of the installation |
+| OpenFOAM | For the CFD wind map: `blockMesh.exe`, `simpleFoam.exe` and the libraries they load, unchanged from OpenCFD's own Windows package of OpenFOAM v2606 (pinned by its SHA-256; the serial variant of its communication library, so no MPI is needed), with OpenFOAM's `etc` folder, in the folder `openfoam`. GPL-3.0: run as separate programs, never linked; the complete source code is beside them in `openfoam\source` |
 | Licences | The folder `licenses` of the installation: Bohemian Wind's, Python's, every package's own files, and the text for every library inside the packages. `PACKAGES.txt` and `LIBRARIES.txt` are the lists. See [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) |
 
 ## How it is built, and what must pass before it is offered

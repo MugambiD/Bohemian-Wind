@@ -65,6 +65,7 @@ class Job:
         self.log, self.error, self.done = [], "", []
         self.started = time.time()
         self.finished = None
+        self.halt = threading.Event()                # set by "Stop": a long step (CFD) ends at its next check
 
     def say(self, msg: str) -> None:
         self.log.append(str(msg))
@@ -185,6 +186,16 @@ class App:
 
     # ---------- runs ----------
 
+    def halt(self) -> dict:
+        """Ask the running step to stop. Only long steps look (the CFD runs); the others finish."""
+        job = next((j for j in self.jobs.values() if j.status == "running"), None)
+        if job is None:
+            raise ProjectError("Nothing is running.")
+        if not job.halt.is_set():
+            job.halt.set()
+            job.say("Stopping at the next check ...")
+        return job.view()
+
     def busy(self) -> bool:
         return any(j.status == "running" for j in self.jobs.values())
 
@@ -200,6 +211,7 @@ class App:
 
         def work():
             with self.lock:
+                project.halt = job.halt.is_set
                 for step in steps:
                     job.current = step
                     try:
@@ -215,6 +227,7 @@ class App:
                         break
                 else:
                     job.status = "done"
+                project.halt = None
                 job.current, job.finished = None, time.time()
 
         threading.Thread(target=work, daemon=True).start()
@@ -411,6 +424,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/settings": lambda: app.change(lambda p: p.update(str(body.get("section")), body.get("values") or {})),
             "/api/attach": lambda: app.change(lambda p: p.attach(str(body.get("kind")), body.get("path") or "")),
             "/api/run": lambda: app.start(body.get("steps") or [body.get("step")]),
+            "/api/stop": lambda: app.halt(),
             "/api/watch": lambda: app.set_watch(body),
             "/api/pick": lambda: app.pick(body),
             "/api/reveal": lambda: app.reveal(body),

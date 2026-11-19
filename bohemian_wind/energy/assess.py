@@ -61,6 +61,15 @@ def free_stream_energy(tables: np.ndarray, ratio_eff: np.ndarray) -> np.ndarray:
     return out
 
 
+def _complex_model_text(engine: str) -> str:
+    """What the wind map's method can and cannot do over steep ground, for the complex-terrain caution."""
+    if engine == "cfd":
+        return ("The wind map comes from a CFD screening run, which resolves steep ground better than linear theory but has "
+                "not yet been checked against a second mast on ground like this.")
+    return ("The wind map is a linear screening model and is outside its range there; such models can misjudge the wind "
+            "between points a few kilometres apart by far more than the screening rule allows.")
+
+
 def _summary(gross, net_wake, rated_mw: float, other: float) -> dict:
     net = float(net_wake.sum() * other)
     return {"gross_gwh": float(gross.sum() / 1000), "wake_loss_pct": float(100 * (1 - net_wake.sum() / gross.sum())),
@@ -227,9 +236,8 @@ def design(field: WindField, clim: dict, mask: np.ndarray, turbine: Turbine, n_t
         worst = max([steep_mast] + [q["steep_share_pct"] or 0.0 for q in positions])
         cautions.append(
             f"Complex terrain {where}: up to {worst:.0f} % of the ground within {budget.STEEP_RADIUS_M / 1000:g} km is steeper "
-            f"than {budget.STEEP_LIMIT_PCT:g} % (17 degrees). The wind map is a linear screening model and is outside its range "
-            f"there; such models can misjudge the wind between points a few kilometres apart by far more than the screening rule allows. "
-            f"The horizontal uncertainty of {'every turbine' if n_complex == n else f'those {n_complex} turbines'} is multiplied by "
+            f"than {budget.STEEP_LIMIT_PCT:g} % (17 degrees). " + _complex_model_text(field.engine) +
+            f" The horizontal uncertainty of {'every turbine' if n_complex == n else f'those {n_complex} turbines'} is multiplied by "
             f"{budget.H_COMPLEX_FACTOR:g}. Before relying on the wind at the turbine positions, have an independent flow study "
             "(for example CFD) made by an independent assessor.")
     if ceiling["change_pct"] < -CEILING_CAUTION_PCT:

@@ -38,6 +38,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pytest
           pip install rasterio || echo "rasterio is not available here: the atlas test is skipped"
+      # OpenFOAM for the CFD test (Ubuntu's own package; the Windows setup program carries OpenCFD's Windows build)
+      - name: OpenFOAM
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openfoam
       # The synthetic-mast tests plant known faults in a real year of mast data: brightwind's demo file (MIT licence),
       # taken from its published wheel and used here only, never copied into this repository. Nothing in the wheel is run.
       - name: Mast data for the synthetic-mast tests

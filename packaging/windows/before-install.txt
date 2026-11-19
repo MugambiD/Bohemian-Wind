@@ -11,4 +11,4 @@ YOUR DATA STAYS HERE
 The program runs on this computer only and sends nothing anywhere. It downloads only what a project asks for: reference wind data (NASA POWER), terrain heights (SRTM) and, when you press "Get buildings", building outlines (OpenStreetMap and Microsoft). Projects are kept in Documents\Bohemian Wind unless you choose another folder; removing the program leaves them where they are.
 
 LICENCES
-Bohemian Wind is under the MIT licence, shown on the previous page. Python and the packages come under their own open-source licences. All of them are in the folder "licenses" of the installation; PACKAGES.txt and LIBRARIES.txt there say what is inside and under which licence.
+Bohemian Wind is under the MIT licence, shown on the previous page. Python and the packages come under their own open-source licences. The CFD wind map runs OpenFOAM, free software under the GNU General Public License v3, as separate programs; they come with their licence and their complete source code in the folder "openfoam". All of them are in the folder "licenses" of the installation; PACKAGES.txt and LIBRARIES.txt there say what is inside and under which licence.

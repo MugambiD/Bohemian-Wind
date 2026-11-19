@@ -34,6 +34,9 @@ from . import paths
 
 FILE = "project.json"
 STEPS = ("data", "longterm", "map", "layout", "environment", "pack")
+ENGINE_NAMES = {"linear": "Own linear flow model (terrain speed-up)",
+                "atlas": "Global Wind Atlas pattern, scaled to the mast",
+                "cfd": "CFD with OpenFOAM (steady RANS; hours of computing)"}
 STEP_NAMES = {"data": "Mast data", "longterm": "Long-term correction", "map": "Wind map", "layout": "Layout and energy",
               "environment": "Noise and shadow flicker", "pack": "Permitting pack"}
 NEEDS = {"data": (), "longterm": ("data",), "map": ("data",), "layout": ("map",), "environment": ("layout",),
@@ -63,6 +66,8 @@ def _feed_map(s: dict) -> dict:
     m = dict(s["map"])
     if m.get("engine") != "atlas":                 # the atlas folder counts only for the atlas engine
         m.pop("gwa_dir", None)
+    if m.get("engine") != "cfd":                   # and the CFD cell size only for CFD
+        m.pop("cfd_resolution", None)
     return {**m, "direction_offset_deg": s["data"].get("direction_offset_deg") or 0.0,
             "shear_alpha": s["data"].get("shear_alpha")}
 
@@ -162,7 +167,9 @@ def defaults() -> dict:
                  "channels": {}},
         "longterm": {"source": "power", "monthly_file": "", "daily_file": ""},
         # 50 m cells: on a real ridge the crests were narrower than 100 m cells, and a layout lost several per cent of its energy
-        "map": {"engine": "linear", "height_m": 120.0, "half_km": 8.0, "res_m": 50.0, "z0_m": 0.05, "gwa_dir": ""},
+        "map": {"engine": "linear", "height_m": 120.0, "half_km": 8.0, "res_m": 50.0, "z0_m": 0.05, "gwa_dir": "",
+                # CFD cell size over the map: quick 200 m, standard 100 m, fine 50 m (bohemian_wind.flow.cfd)
+                "cfd_resolution": "quick"},
         "layout": {"turbine": "4.5 MW, 163 m rotor", "rated_kw": 4500.0, "rotor_m": 163.0, "hub_m": 120.0,
                    "n_turbines": 10, "cross_d": 3.0, "along_d": 7.0, "link_m": 2500.0, "wake": "niayifar", "refine": True,
                    "exclusions_file": "", "receptors_file": "", "boundary_file": "",
@@ -226,6 +233,7 @@ class Project:
     def __init__(self, folder, settings: dict):
         self.folder = Path(folder)
         self.s = settings
+        self.halt = None             # a callable the application sets while a run may be stopped (CFD checks it)
 
     # ---------- open, create, save ----------
 
@@ -508,12 +516,12 @@ class Project:
         out = [pos["caution"]] if pos and pos["caution"] else []
         return info, out
 
-    def complex_warning(self, steep_pct: float) -> str:
+    def complex_warning(self, steep_pct: float, engine: str = "linear") -> str:
         from .energy import budget  # noqa: PLC0415
+        from .energy.assess import _complex_model_text  # noqa: PLC0415
         return (f"Complex terrain round the mast: {steep_pct:.0f} % of the ground within {budget.STEEP_RADIUS_M / 1000:g} km is steeper "
-                f"than {budget.STEEP_LIMIT_PCT:g} % (17 degrees). The wind map is a linear screening model and is outside its range "
-                "here; such models can misjudge the wind between points a few kilometres apart by far more than the screening rule allows. "
-                "The energy step multiplies the horizontal uncertainty of turbines here by "
+                f"than {budget.STEEP_LIMIT_PCT:g} % (17 degrees). " + _complex_model_text(engine).replace(" there;", " here;") +
+                " The energy step multiplies the horizontal uncertainty of turbines here by "
                 f"{budget.H_COMPLEX_FACTOR:g}. Before relying on the wind away from the mast, have an independent flow study "
                 "(for example CFD) made by an independent assessor.")
 
@@ -649,24 +657,66 @@ class Project:
                "alpha": round(alpha, 5), "climate": (self.result("data") or {}).get("at"), "half_km": float(m["half_km"]),
                "rotate_deg": offset, "gwa_dir": str(m.get("gwa_dir") or "") if m["engine"] == "atlas" else "",
                "field_version": fields.VERSION}
+        if m["engine"] == "cfd":
+            key["cfd"] = self.cfd_key(clim, offset)
         store, meta = self.folder / "maps" / f"windfield_{height_m:g}m.npz", self.folder / "maps" / f"windfield_{height_m:g}m.json"
         if store.is_file() and meta.is_file() and json.loads(meta.read_text(encoding="utf-8")) == key:
             return fields.WindField.load(store)
         grid = self.grid()
-        log(f"Computing the wind field at {height_m:g} m ({'own linear flow model' if m['engine'] == 'linear' else 'atlas pattern'}) ...")
+        if m["engine"] == "cfd":
+            self.ensure_cfd(grid, clim, offset, log)
+        log(f"Computing the wind field at {height_m:g} m ({ENGINE_NAMES.get(m['engine'], m['engine']).lower()}) ...")
         gwa = self.resolve(m.get("gwa_dir")) if m["engine"] == "atlas" else None
         if m["engine"] == "atlas" and not gwa:
             raise ProjectError("The atlas engine needs the folder with the Global Wind Atlas GeoTIFF files for this area "
                                "(download them from globalwindatlas.info), or choose the own flow model.")
         try:
             wf = fields.wind_field(grid, clim, height_m, m["engine"], z0_m=float(m["z0_m"]), lt_factor=factor, alpha=alpha,
-                                   gwa_dir=gwa, keep_half_m=float(m["half_km"]) * 1000.0, rotate_deg=offset)
+                                   gwa_dir=gwa, keep_half_m=float(m["half_km"]) * 1000.0, rotate_deg=offset,
+                                   cfd_dir=self.folder / "cfd")
         except fields.FlowError as e:
             raise ProjectError(str(e)) from e
         self.path("maps", "x")
         wf.save(store)
         meta.write_text(json.dumps(key), encoding="utf-8")
         return wf
+
+    def cfd_key(self, clim: dict, offset: float) -> dict:
+        """What a stored CFD run must match to be used: the terrain, the area, the roughness, the cell size and the
+        wind directions (sectors turned by the vane correction)."""
+        from .flow import cfd  # noqa: PLC0415
+        m = self.s["map"]
+        res = str(m.get("cfd_resolution") or "quick")
+        if res not in cfd.RESOLUTIONS:
+            raise ProjectError(f"Unknown CFD cell size '{res}'. Choose quick, standard or fine.")
+        centres = (_climate.sector_arrays(clim)[0] + offset) % 360.0
+        gfile = self.folder / "terrain" / "grid.npz"
+        stamp = gfile.stat().st_mtime_ns if gfile.is_file() else 0
+        return {"version": cfd.VERSION, "resolution": res, "cell_m": cfd.RESOLUTIONS[res], "z0_m": float(m["z0_m"]),
+                "half_km": float(m["half_km"]), "centres": [round(float(c), 2) for c in centres], "terrain": stamp}
+
+    def ensure_cfd(self, grid, clim: dict, offset: float, log=print) -> dict:
+        """The stored CFD run when it matches the map's settings, else a new one (hours: see cfd.estimate)."""
+        from .flow import cfd  # noqa: PLC0415
+        key = self.cfd_key(clim, offset)
+        out = self.folder / "cfd"
+        kfile = out / "cfd_key.json"
+        if (out / "cfd.npz").is_file() and kfile.is_file() and json.loads(kfile.read_text(encoding="utf-8")) == key:
+            log("CFD: using the stored run.")
+            return key
+        if cfd.find_openfoam() is None:
+            raise ProjectError("The CFD method needs OpenFOAM. The Windows setup program installs it with Bohemian Wind; "
+                               "on Linux install the openfoam package. Or choose the own flow model.")
+        s = cfd.Settings(cell_m=key["cell_m"], z0_m=key["z0_m"])
+        kfile.unlink(missing_ok=True)
+        try:
+            cfd.run(grid, key["centres"], out, key["half_km"] * 1000.0, s, log=log, stop=getattr(self, "halt", None))
+        except cfd.CfdError as e:
+            if str(e) == "stopped":
+                raise ProjectError("The CFD run was stopped. Nothing of it was kept; run step 3 again to start it afresh.") from e
+            raise ProjectError(f"The CFD run did not finish: {e}") from e
+        kfile.write_text(json.dumps(key), encoding="utf-8")
+        return key
 
     # ---------- step 1: mast data ----------
 
@@ -805,7 +855,9 @@ class Project:
         scale = self.speed_scale(clim)
         f_note = scale["basis"]
         _, a_note = self.alpha(clim)
-        sub = f"{self.s['name']}: {'own linear flow model' if wf.engine == 'linear' else 'Global Wind Atlas pattern scaled to the mast'}; {scale['short']}"
+        short = {"linear": "own linear flow model", "atlas": "Global Wind Atlas pattern scaled to the mast",
+                 "cfd": "CFD (OpenFOAM, steady RANS)"}.get(wf.engine, wf.engine)
+        sub = f"{self.s['name']}: {short}; {scale['short']}"
         dark = maps.wind_map(wf.grid, wf.mean_ws, self.path("maps", "wind_map.png"), height_m=height, theme="dark",
                              title=f"Mean wind speed at {height:g} m", subtitle=sub)
         light = maps.wind_map(wf.grid, wf.mean_ws, self.path("maps", "wind_map_print.png"), height_m=height, theme="light",
@@ -813,6 +865,9 @@ class Project:
         credits = [terrain.TERRAIN_CREDIT] if "SRTM" in (wf.grid.source or "") else [f"Terrain: {wf.grid.source}."] if wf.grid.source else []
         if wf.engine == "atlas":
             credits.append(fields.GWA_CREDIT)
+        if wf.engine == "cfd":
+            from .flow import cfd  # noqa: PLC0415
+            credits.append(cfd.CREDIT)
         out = {"height_m": height, "engine": wf.engine, "map": self.rel(dark), "map_print": self.rel(light),
                "mast_mean_ws": wf.mast_mean_ws, "min_ws": float(np.nanmin(wf.mean_ws)), "max_ws": float(np.nanmax(wf.mean_ws)),
                "p95_ws": float(np.nanpercentile(wf.mean_ws, 95)), "steep_share_pct": 100.0 * wf.steep_share,
@@ -826,7 +881,7 @@ class Project:
                "climate_scale": scale["scale"], "warnings": self.warnings(clim) + list(wf.cautions)}
         checks, more = self.site_checks(wf.grid, clim)
         out.update(checks)
-        out["warnings"] += more + ([self.complex_warning(checks["steep_share_mast_pct"])] if checks["complex_terrain"] else [])
+        out["warnings"] += more + ([self.complex_warning(checks["steep_share_mast_pct"], wf.engine)] if checks["complex_terrain"] else [])
         pc = checks["position_check"]
         if pc and not pc["caution"]:
             out["notes"].append(f"Mast position checked against its barometer: {pc['measured_hpa']:.0f} hPa measured, "
@@ -1187,5 +1242,15 @@ def describe() -> dict:
             "steps": [{"key": k, "name": STEP_NAMES[k]} for k in STEPS],
             "turbines": [{"key": k, **v.as_dict()} for k, v in PRESETS.items()],
             "wake_models": [{"key": k, "name": v} for k, v in wakes.WAKE_MODELS.items()],
-            "engines": [{"key": "linear", "name": "Own linear flow model (terrain speed-up)"},
-                        {"key": "atlas", "name": "Global Wind Atlas pattern, scaled to the mast"}]}
+            "engines": [{"key": k, "name": v} for k, v in ENGINE_NAMES.items()],
+            "cfd": {"available": cfd_available(), "resolutions": [{"key": k, "cell_m": v} for k, v in _cfd_resolutions().items()]}}
+
+
+def cfd_available() -> bool:
+    from .flow import cfd  # noqa: PLC0415
+    return cfd.available()
+
+
+def _cfd_resolutions() -> dict:
+    from .flow import cfd  # noqa: PLC0415
+    return dict(cfd.RESOLUTIONS)

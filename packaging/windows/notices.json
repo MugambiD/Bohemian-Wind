@@ -123,7 +123,8 @@
       "files": [
         "zlib1.dll",
         "zlib.dll",
-        "z.dll"
+        "z.dll",
+        "libz.dll"
       ],
       "text": "zlib.txt"
     },
@@ -492,7 +493,58 @@
         "tinyxml2.dll"
       ],
       "text": "TinyXML-2.txt"
+    },
+    {
+      "name": "OpenFOAM v2606 (OpenCFD Ltd), Windows build",
+      "licence": "GPL-3.0-or-later",
+      "source": "https://dl.openfoam.com/source/v2606/ (also in the installation: openfoam\\source\\OpenFOAM-v2606.tgz)",
+      "files": [
+        "libOpenFOAM.dll",
+        "libPstream.dll",
+        "libatmosphericModels.dll",
+        "libblockMesh.dll",
+        "libcompressibleTransportModels.dll",
+        "libcompressibleTurbulenceModels.dll",
+        "libdynamicFvMesh.dll",
+        "libdynamicMesh.dll",
+        "libextrudeModel.dll",
+        "libfileFormats.dll",
+        "libfiniteVolume.dll",
+        "libfluidThermophysicalModels.dll",
+        "libfvOptions.dll",
+        "libincompressibleTransportModels.dll",
+        "libincompressibleTurbulenceModels.dll",
+        "liblagrangian.dll",
+        "libmeshTools.dll",
+        "liboverset.dll",
+        "libsampling.dll",
+        "libspecie.dll",
+        "libsurfMesh.dll",
+        "libthermophysicalProperties.dll",
+        "libturbulenceModels.dll",
+        "libtwoPhaseMixture.dll"
+      ],
+      "text": "OpenFOAM-GPL-3.0.txt"
+    },
+    {
+      "name": "GCC runtime libraries (libstdc++, libgcc) of OpenFOAM's Windows build",
+      "licence": "GPL-3.0-or-later WITH GCC-exception-3.1",
+      "source": "https://gcc.gnu.org",
+      "files": [
+        "libstdc++-6.dll",
+        "libgcc_s_seh-1.dll"
+      ],
+      "text": "GCC-Runtime-Library-Exception.txt"
+    },
+    {
+      "name": "MinGW-w64 winpthreads (in OpenFOAM's Windows build)",
+      "licence": "MIT, with parts under a BSD-style licence (see its COPYING file)",
+      "source": "https://www.mingw-w64.org",
+      "files": [
+        "libwinpthread-1.dll"
+      ],
+      "where": "COPYING in mingw-w64-libraries/winpthreads of the MinGW-w64 source, https://sourceforge.net/projects/mingw-w64/"
     }
   ],
-  "copyleft": "Three kinds of library here are under a licence that asks more than keeping the notice. (1) The GCC runtime library inside OpenBLAS (numpy, scipy): GPL 3 or later with the GCC Runtime Library Exception, which allows passing it on as part of a program built with GCC. (2) GNU libiconv (netCDF4, rasterio) and GEOS (rasterio): LGPL 2.1 or later; they are separate files, unchanged, and can be replaced by the user. (3) SpatiaLite and FreeXL (rasterio): a choice of three licences, taken here under the Mozilla Public License 1.1. The source of each is at the address given. Bohemian Wind's own code contains none of them and stays under the MIT licence."
+  "copyleft": "Three kinds of library here are under a licence that asks more than keeping the notice. (1) The GCC runtime library inside OpenBLAS (numpy, scipy): GPL 3 or later with the GCC Runtime Library Exception, which allows passing it on as part of a program built with GCC. (2) GNU libiconv (netCDF4, rasterio) and GEOS (rasterio): LGPL 2.1 or later; they are separate files, unchanged, and can be replaced by the user. (3) SpatiaLite and FreeXL (rasterio): a choice of three licences, taken here under the Mozilla Public License 1.1. The source of each is at the address given. Bohemian Wind's own code contains none of them and stays under the MIT licence. (4) OpenFOAM (folder openfoam): GPL-3.0 or later. It is a set of separate programs that Bohemian Wind starts and exchanges files with; none of its code is in Bohemian Wind and Bohemian Wind is not linked with it. Its complete source code is passed on with it (openfoam/source), and its GCC runtime libraries carry the GCC Runtime Library Exception."
 }

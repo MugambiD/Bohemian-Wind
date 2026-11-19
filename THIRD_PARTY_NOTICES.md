@@ -1,6 +1,6 @@
 # Third-party notices
 
-Bohemian Wind is Bohemian Renewables' own code under the MIT licence. It uses these open-source components, each under its own licence. Bohemian Wind's own code contains no GPL-licensed code. The Windows setup program passes on Python and the packages as their authors publish them; what is inside those, and under which licences, is set out under "The Windows setup program" below.
+Bohemian Wind is Bohemian Renewables' own code under the MIT licence. It uses these open-source components, each under its own licence. Bohemian Wind's own code contains no GPL-licensed code. Its CFD wind map runs OpenFOAM (GPL-3.0) as separate programs, without linking to it (see below). The Windows setup program passes on Python and the packages as their authors publish them; what is inside those, and under which licences, is set out under "The Windows setup program" below.
 
 ## Python packages (installed by `requirements.txt`)
 
@@ -23,6 +23,7 @@ Bohemian Wind is Bohemian Renewables' own code under the MIT licence. It uses th
 |---|---|---|
 | The archive program of the operating system: `tar.exe` of Windows 10 and 11, `tar` of macOS, `bsdtar` on Linux (all built on libarchive) | BSD-2-Clause (libarchive); part of the operating system | opening RAR and 7z archives of logger files |
 | 7-Zip, WinRAR's UnRAR, where the user has installed them | their own licences; the user's own copy | the same, where the program above cannot open an archive |
+| OpenFOAM (OpenCFD Ltd) on Linux and macOS, where the user has installed it | GPL-3.0-or-later | the CFD wind map: `blockMesh` and `simpleFoam` run as separate programs (`bohemian_wind/flow/cfd.py`) |
 
 [COMPLIANCE] Nothing that opens RAR archives is part of Bohemian Wind or of its setup program. The RAR method is not open (UnRAR's licence forbids using its source to build a RAR archiver), so it is left to programs the computer already has. ZIP and tar archives are opened with Python's own library.
 
@@ -39,6 +40,7 @@ The setup program (`packaging/windows/`, built by the build server) installs a p
 - **Packages.** `packaging/windows/notices.json` lists each package with its licence: MIT, BSD, Apache 2.0, PSF-style, CC0 and, for certifi and part of tqdm, MPL 2.0. Each package's own licence files are copied into the folder `licenses\packages` of the installation, and `licenses\PACKAGES.txt` lists them.
 - **Libraries inside the packages.** Several packages carry compiled libraries (about 100 `.dll` files of 45 libraries). `notices.json` names each library, its licence and where its source is; the licence texts are in `packaging/windows/licenses/` and are installed into `licenses\libraries`, with the list in `licenses\LIBRARIES.txt`. Most are under MIT, BSD, Apache 2.0, zlib-style or public-domain terms.
 - **Three kinds ask more than keeping the notice.** (1) The GCC runtime library inside OpenBLAS, which numpy and scipy carry: GPL 3 or later with the GCC Runtime Library Exception, which allows passing it on as part of a program built with GCC. (2) GNU libiconv (in netCDF4 and rasterio) and GEOS (in rasterio): LGPL 2.1 or later; they are separate files, unchanged, and can be replaced by the user. (3) SpatiaLite and FreeXL (in rasterio): a choice of MPL 1.1, GPL 2 or later, or LGPL 2.1 or later, taken here under MPL 1.1. Their sources are at the addresses given in `notices.json`.
+- **OpenFOAM, for the CFD wind map.** The setup program carries `blockMesh.exe`, `simpleFoam.exe` and the libraries they load, unchanged from OpenCFD's own Windows package of OpenFOAM v2606 (pinned by its SHA-256), with OpenFOAM's `etc` folder, in the folder `openfoam` of the installation. OpenFOAM is under the GNU General Public License v3 or later. Bohemian Wind starts these programs as separate processes and exchanges files with them; it contains none of OpenFOAM's code and is not linked with it, so its own code stays under the MIT licence. The complete source code of OpenFOAM v2606 travels with the programs (`openfoam\source\OpenFOAM-v2606.tgz`), with the licence text and a README. Its GCC runtime libraries carry the GCC Runtime Library Exception; `libwinpthread-1.dll` is MinGW-w64's (MIT-style); `libz.dll` is zlib. OpenFOAM® is a registered trade mark of OpenCFD Ltd; Bohemian Wind is not approved or endorsed by OpenCFD Ltd.
 - **The build stops** when the bundle holds a package or a library file that the list does not name, or a package that declares a GPL licence the list does not expect. Nothing is passed on unread.
 - **Inno Setup** (Jordan Russell and Martijn Laan, Inno Setup licence) makes the setup program; its small start-up and removal code is part of every setup program it makes.
 

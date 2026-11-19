@@ -228,7 +228,8 @@
     const cur = job.current || job.steps[Math.min(job.done.length, job.steps.length - 1)];
     const many = job.steps.length > 1 ? ` (step ${Math.min(job.done.length + 1, job.steps.length)} of ${job.steps.length} in this run)` : '';
     return `<section class="card"><div class="working">${ICON.cups}<div><h2 id="w-title">Working: ${esc(STEP[cur].title.toLowerCase())}${many}</h2>
-      <p class="note">This can take from a few seconds to a few minutes. You can look at the other steps meanwhile.</p>
+      <p class="note">${S.project && S.project.map.engine === 'cfd' && ['map', 'layout', 'environment', 'pack'].includes(cur) ? 'A CFD run takes from an hour to several. You can close this window: the run goes on, and starting Bohemian Wind again brings you back to it.' : 'This can take from a few seconds to a few minutes.'} You can look at the other steps meanwhile.</p>
+      ${S.project && S.project.map.engine === 'cfd' && cur === 'map' ? '<button class="btn" type="button" data-act="halt">Stop the CFD run</button>' : ''}
       <div class="logbox" id="w-log">${logLines.slice(-60).map(l => `<div>${esc(l)}</div>`).join('')}</div></div></div></section>`;
   }
 
@@ -280,6 +281,8 @@
       const m = S.project.map;
       return card('How to map the wind', fSelect('map', 'engine', 'Method', S.app.engines.map(e => [e.key, e.name]), { rerender: true })
         + (m.engine === 'atlas' ? fText('map', 'gwa_dir', 'Folder with the Global Wind Atlas files', { pick: 'folder', help: 'GeoTIFF wind speed layers for the area, from globalwindatlas.info.' }) : '')
+        + (m.engine === 'cfd' ? fSelect('map', 'cfd_resolution', 'CFD cells over the map', (S.app.cfd.resolutions || []).map(r => [r.key, `${r.key[0].toUpperCase() + r.key.slice(1)}: ${num(r.cell_m, 0)} m`]),
+            { help: S.app.cfd.available ? 'Quick takes about an hour on a laptop for 12 wind directions over 8 km each way; standard several hours; fine is for a powerful computer. The run is kept: changing the height or the turbines does not repeat it. Steady RANS with OpenFOAM, a screening model: a lender will still want an independent flow study.' : 'OpenFOAM was not found on this computer. The Windows setup program installs it with Bohemian Wind; on Linux install the openfoam package.' }) : '')
         + `<div class="row2">${fNum('map', 'height_m', 'Height above ground, m', { min: 10, max: 300 })}${fNum('map', 'half_km', 'Distance from the mast, km', { min: 2, max: 30, help: 'Each way.' })}</div>
            <details class="more"><summary>Grid and roughness</summary><div class="row2">${fNum('map', 'res_m', 'Cell size, m', { min: 30, max: 500, help: '50 for narrow ridges, 100 for open ground.' })}${fNum('map', 'z0_m', 'Roughness length, m', { min: 0.0002, max: 2, help: '0.03 grass, 0.05 farmland, 0.3 bush.' })}</div></details>`);
     },
@@ -639,6 +642,7 @@
     else if (what === 'open-recent') act(async () => { S = await api('/api/project', { action: 'open', folder: a.dataset.folder }); view = 'home'; lastError = null; render(); });
     else if (what === 'close') act(async () => { S = await api('/api/project', { action: 'close' }); view = 'home'; lastError = null; render(); });
     else if (what === 'runall') runSteps(ORDER);
+    else if (what === 'halt') act(async () => { a.disabled = true; await api('/api/stop', {}); toast('Stopping the CFD run.'); });
     else if (what === 'reveal') act(() => api('/api/reveal', { path: a.dataset.path }));
     else if (what === 'detach') act(async () => { S = await api('/api/settings', { section: 'layout', values: { [a.dataset.kind + '_file']: '' } }); render(true); });
   });

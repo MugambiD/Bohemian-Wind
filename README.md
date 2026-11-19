@@ -29,14 +29,15 @@ Six steps, in order. Each screen asks for what it needs on the left and shows wh
 
 ## Where each part stands
 
-Honest status of this version (0.2.4-dev). "Working" means it runs end to end and is covered by tests with known answers; it does not mean validated against measurements.
+Honest status of this version (0.2.5-dev). "Working" means it runs end to end and is covered by tests with known answers; it does not mean validated against measurements.
 
 | Capability | State |
 |---|---|
 | Daily mast data arriving automatically | **Working as a folder watch.** It re-runs the checks when logger files appear and warns when data stops. It does not fetch from the logger, its email or its cloud service: point those at the folder. |
 | Data quality checks and analysis | **Working** for NRG SymphoniePRO, NRG Symphonie text exports (Symphonie Data Retriever), Campbell Scientific TOA5, SecondWind Nomad2 and WindPRO time series exports. RLD files need NRG's free SymPRO Desktop (Windows) to convert them, raw RWD files NRG's free Symphonie Data Retriever. ZIP, RAR, 7z and tar archives of logger files are opened as they are; RAR and 7z with the archive program the computer already has. |
 | Long-term correction | **Working, one method:** a monthly index against NASA POWER (MERRA-2 at 50 m), with a check of the vane's north against the reanalysis wind direction. No second reference, no hourly method yet. |
-| Wind resource maps | **Working, two methods:** the own flow model over SRTM terrain, or the Global Wind Atlas pattern scaled to the mast. |
+| Wind resource maps | **Working, three methods:** the own flow model over SRTM terrain, the Global Wind Atlas pattern scaled to the mast, or CFD with OpenFOAM. |
+| CFD wind map | **First version.** Steady RANS with OpenFOAM (GPL-3.0, run as separate programs; the Windows setup program carries it with its source). Checked on invented hills; not yet against a second mast in complex terrain. Hours of computing. |
 | Own flow model | **First version.** Terrain speed-up from linear theory (Jackson and Hunt). Tested against theory only, not yet against measured hills or a second mast. Not for steep terrain. |
 | Turbine layout with constraints | **Working.** Best cells first with a spacing rule, then wake-aware fine-tuning. It is not a global optimiser. A layout of your own (one point per turbine) can be given instead and is taken as it is. |
 | Wake effects and energy yield | **Working,** through [PyWake](https://topfarm.pages.windenergy.dtu.dk/PyWake/) (DTU). Generic turbines by size; no manufacturer curves. |
@@ -46,7 +47,7 @@ Honest status of this version (0.2.4-dev). "Working" means it runs end to end an
 | Homes | **Working, from open data and your own file.** Buildings from OpenStreetMap and from Microsoft's building footprints are downloaded for the site and merged, and the application says where the two disagree. Your own file of homes (placemarks from Google Earth, for example) goes on top. Every building counts as a home; none of it is a survey. |
 | Permitting support | **Working as a pack** of tables, maps and GIS files. It is not legal advice and replaces no study a permit needs. |
 
-Not in it: wind turbine suitability and loads, complex-terrain flow modelling (CFD), electrical design, financial modelling, and anything a lender would call bankable. For those, and for any figure that goes to a financing decision, use an independent accredited assessor.
+Not in it: wind turbine suitability and loads, a flow study a lender would accept for complex terrain (the CFD map here is a developer's screening run), electrical design, financial modelling, and anything a lender would call bankable. For those, and for any figure that goes to a financing decision, use an independent accredited assessor.
 
 ## Start
 
