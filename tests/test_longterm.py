@@ -1,5 +1,6 @@
 """Long-term index: known answers on series written here. Run: python -m pytest tests/test_longterm.py -q"""
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -221,3 +222,94 @@ def test_the_measured_days_are_asked_for_with_their_direction(tmp_path, monkeypa
     out = lt.fetch_power(-1.0, 36.0, tmp_path / "b", period=("2022-03-01", "2022-06-28"))
     assert set(out) == {"monthly", "daily"}
     assert set(lt.fetch_power(-1.0, 36.0, tmp_path / "c")) == {"monthly", "daily"}
+
+
+# ---------- air for masts with no thermometer or barometer: the reanalysis cell's temperature and pressure ----------
+
+def _monthly_with_air(path, years=(2006, 2025), t=18.0, p=80.0, elevation=2000.0, extras=True):
+    """An invented NASA POWER monthly file: two warmer years before the window, then the window itself."""
+    par = {"WS50M": {}, "T2M": {}, "PS": {}}
+    for y in range(years[0] - 2, years[1] + 1):
+        for m in range(1, 13):
+            k = f"{y}{m:02d}"
+            par["WS50M"][k] = 5.0
+            par["T2M"][k] = t + (m - 6.5) * 0.2 + (5.0 if y < years[0] else 0.0)
+            par["PS"][k] = p
+        for name in par:
+            par[name][f"{y}13"] = -999.0                    # the annual entries are not months
+    if not extras:
+        par = {"WS50M": par["WS50M"]}
+    path.write_text(json.dumps({"geometry": {"type": "Point", "coordinates": [36.0, -1.0, elevation]},
+                                "properties": {"parameter": par}}))
+
+
+def test_reference_air_is_the_long_term_mean_of_the_cell(tmp_path):
+    f = tmp_path / "monthly.json"
+    _monthly_with_air(f)
+    assert lt.reference_air(f, 2006, 2025) == {"t2m_c": 18.0, "ps_kpa": 80.0, "elevation_m": 2000.0, "months": 240,
+                                               "source": "NASA POWER, MERRA-2"}
+    assert lt.reference_air(f)["t2m_c"] == pytest.approx(18.0 + 5.0 * 24 / 264, abs=1e-3)      # no window: every month
+    assert lt.reference_air(f, 2030, 2031) is None                                           # no months in the window
+    _monthly_with_air(f, extras=False)                                                       # a file with wind speeds only
+    assert lt.reference_air(f, 2006, 2025) is None and lt.reference_air(tmp_path / "missing.json") is None
+    f.write_text(json.dumps({"properties": {"parameter": {"T2M": {}, "PS": {}}}}))            # no cell elevation
+    assert lt.reference_air(f) is None
+
+
+def test_air_density_without_a_measurement_comes_from_the_reference_air():
+    from bohemian_wind.energy import turbine
+    air = {"t2m_c": 20.0, "ps_kpa": 90.0, "elevation_m": 1000.0, "source": "NASA POWER, MERRA-2"}
+    # known answer: the site 500 m above the cell, the hub 100 m above the site
+    z = 1500.0 + 100.0
+    t_site = 293.15 - 0.0065 * (z - 1000.0 - 2.0)
+    p_site = 90000.0 * math.exp(-9.80665 * (z - 1000.0) / (287.05 * 0.5 * (293.15 + t_site)))
+    expected = p_site / (287.05 * t_site)
+    assert turbine.reference_density(1500.0, 100.0, air) == pytest.approx(expected, rel=1e-12) and 1.00 < expected < 1.02
+    # at the cell's own elevation, 2 m up: its temperature as it stands, its pressure less 2 m of air
+    assert turbine.reference_density(1000.0, 2.0, air) == pytest.approx(
+        90000.0 * math.exp(-9.80665 * 2.0 / (287.05 * 293.15)) / (287.05 * 293.15), rel=1e-12)
+    rho, src = turbine.air_density(1500.0, 100.0, reference=air)
+    assert rho == pytest.approx(expected) and src.startswith("not measured: long-term temperature and pressure of the reanalysis (NASA POWER, MERRA-2)")
+    # a density the mast measured comes first
+    rho, src = turbine.air_density(1500.0, 100.0, 1.0, 10.0, reference=air)
+    assert src.startswith("measured") and rho == pytest.approx(1.0 * math.exp(-90.0 / turbine.RHO_SCALE_HEIGHT))
+    # nothing known: the standard atmosphere, colder than this cell and so denser, and it says so
+    isa, src = turbine.air_density(1500.0, 100.0)
+    assert src.startswith("not measured: standard atmosphere") and "too dense for a warm climate" in src
+    assert isa == pytest.approx(1.225 * (1 - 2.25577e-5 * 1600.0) ** 4.25588) and isa > expected * 1.03
+    # a reference that cannot be used, or no site elevation to carry it to: the standard atmosphere again
+    assert turbine.air_density(1500.0, 100.0, reference={"t2m_c": "x"})[1].startswith("not measured: standard atmosphere")
+    assert turbine.air_density(None, 100.0, reference=air)[1].startswith("not measured: standard atmosphere")
+    assert turbine.reference_density(1500.0, 100.0, {"t2m_c": -200.0, "ps_kpa": 90.0, "elevation_m": 0.0}) is None
+
+
+def test_the_monthly_download_asks_for_temperature_and_pressure_and_does_without_if_refused(tmp_path, monkeypatch):
+    asked = []
+
+    class Reply:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return json.dumps({"properties": {"parameter": {"WS50M": {"202201": 6.0}}}}).encode()
+
+    def fake(req, timeout=0):
+        asked.append(req.full_url)
+        if refuse["extras"] and "T2M" in req.full_url:
+            raise OSError("422")
+        return Reply()
+
+    refuse = {"extras": False}
+    monkeypatch.setattr(lt.urllib.request, "urlopen", fake)
+    out = lt.fetch_power(-1.0, 36.0, tmp_path)
+    monthly = [u for u in asked if "/monthly/" in u]
+    assert len(monthly) == 1 and "parameters=WS50M,T2M,PS" in monthly[0] and set(out) == {"monthly", "daily"}
+    assert all("T2M" not in u for u in asked if "/daily/" in u)
+    asked.clear()
+    refuse["extras"] = True                                   # the wind speed alone still makes a long-term correction
+    out = lt.fetch_power(-1.0, 36.0, tmp_path / "b")
+    monthly = [u for u in asked if "/monthly/" in u]
+    assert [("T2M" in u) for u in monthly] == [True, False] and "parameters=WS50M&" in monthly[1] and "monthly" in out

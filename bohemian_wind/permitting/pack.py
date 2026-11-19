@@ -109,7 +109,9 @@ def build(project, log=print) -> dict:
     for h in homes:
         feats.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(h["lon"], 6), round(h["lat"], 6)]},
                       "properties": {"kind": "home", "name": h["name"]}})
-    put("layout.geojson", "Turbines, mast and assessed homes for GIS software (WGS 84)").write_text(
+    n_homes = int(((env or {}).get("noise") or {}).get("n_receptors") or len(homes))
+    which = "assessed homes" if len(homes) >= n_homes else f"the {len(homes)} homes with the highest noise levels (of {n_homes:,} assessed)"
+    put("layout.geojson", f"Turbines, mast and {which} for GIS software (WGS 84)").write_text(
         json.dumps({"type": "FeatureCollection", "features": feats}, indent=1), encoding="utf-8")
     put("layout.kml", "The same, for Google Earth").write_text(_kml(name, lay["positions"], site, homes, t["tip_height_m"]), encoding="utf-8")
     # 3 constraints
@@ -181,29 +183,33 @@ mean wind speed {data.get('mean_ws', float('nan')):.2f} m/s at {data.get('top_he
     if env:
         nz, fl = env["noise"], env["flicker"]
         sec.append(f"""<h2>{n}. Noise screening</h2>
-<p>{nz['n_receptors']} homes assessed; {nz['over_limit']} above the {nz['limit_dba']:g} dB(A) level used here
-({nz['over_limit_with_uncertainty']} with a {nz['uncertainty_db']:g} dB allowance). Sound power {nz['sound_power_dba']:g} dB(A) per turbine.
+<p>{nz['n_receptors']:,} homes assessed; {nz['over_limit']:,} above the {nz['limit_dba']:g} dB(A) level used here
+({nz['over_limit_with_uncertainty']:,} with a {nz['uncertainty_db']:g} dB allowance). Sound power {nz['sound_power_dba']:g} dB(A) per turbine.
 Method: {_e(nz['method'])}.</p>""")
         if (out_dir / "map_noise.png").is_file():
             sec.append("<img class='map' src='map_noise.png' alt='Noise map'>")
         sec.append(_table(["Home", "Level, dB(A)", "With allowance", "Nearest turbine", "Distance, m", "Against the level used"],
                           [[r["name"], f"{r['level_dba']:.1f}", f"{r['level_plus_uncertainty_dba']:.1f}", r["nearest_turbine"],
                             f"{r['distance_m']:.0f}", "Over" if r["over_limit"] else "Within"] for r in nz["receptors"][:25]], over_col=5))
-        if len(nz["receptors"]) > 25:
-            sec.append(f"<p>The 25 highest of {len(nz['receptors'])} homes are shown; the full list is in noise_at_homes.csv.</p>")
+        if nz["n_receptors"] > 25:
+            sec.append(f"<p>The 25 highest of {nz['n_receptors']:,} homes are shown; the full list is in noise_at_homes.csv.</p>")
         n += 1
         sec.append(f"""<h2>{n}. Shadow flicker screening</h2>
-<p>{fl['with_any_flicker']} of {fl['n_receptors']} homes could see flicker; {fl['over_limit']} exceed {fl['limit_hours_year']:g} hours a year or
+<p>{fl['with_any_flicker']:,} of {fl['n_receptors']:,} homes could see flicker; {fl['over_limit']:,} exceed {fl['limit_hours_year']:g} hours a year or
 {fl['limit_min_day']:g} minutes a day in the astronomical worst case (sun always shining, rotor always turning and facing the
 sun, nothing in between). Real flicker is a fraction of this. Stopping turbines whenever a home could be affected would cost at most
 {fl['shutdown_upper_bound_pct']:.2f} % of operating time. Method: {_e(fl['method'])}.</p>""")
         if (out_dir / "map_shadow_flicker.png").is_file():
             sec.append("<img class='map' src='map_shadow_flicker.png' alt='Shadow flicker map'>")
         shown = [r for r in fl["receptors"] if r["hours_per_year"] > 0][:25]
+        more = fl["with_any_flicker"] - len(shown)
         sec.append(_table(["Home", "Hours a year, worst case", "Longest day, min", "Days", "Turbines", "Against the limits used"],
                           [[r["name"], f"{r['hours_per_year']:.1f}", f"{r['max_minutes_per_day']:.0f}", r["days_with_flicker"],
                             ", ".join(r["turbines"]), "Over" if r["over_limit"] else "Within"] for r in shown], over_col=5)
                    if shown else "<p>No home is within range of flicker.</p>")
+        if shown and more > 0:
+            sec.append(f"<p>The {len(shown)} longest of {fl['with_any_flicker']:,} homes with flicker are shown; the full list is in "
+                       "shadow_flicker_at_homes.csv.</p>")
         n += 1
     else:
         sec.append(f"<h2>{n}. Noise and shadow flicker</h2><p>Not included: run step 5 with a file of homes, then build the pack again.</p>")

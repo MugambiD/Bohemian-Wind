@@ -28,7 +28,7 @@ Every method here is a developer's screening method. The limits are part of the 
 
 **A thin month.** When leaving out a month with 40 to 70 % valid data would leave a calendar month uncovered, and using it completes the twelve, it is used and named. Leaving it out would fall back on a single ratio for the whole period, which is biased when the mast-to-reference ratio changes with the season. A campaign that stays short of twelve calendar months does not use thin months.
 
-**Reference.** NASA POWER, MERRA-2 wind speed at 50 m, downloaded for the mast's position.
+**Reference.** NASA POWER, MERRA-2 wind speed at 50 m, downloaded for the mast's position. The same download brings the temperature at 2 m and the surface pressure, for the air density of masts that measure neither (step 4).
 
 **Vane north check.** With the download comes the reanalysis wind direction for the days measured. The mast's daily direction at the top height, after any vane correction entered, is set against it on days when both read 5 m/s or more, and the typical difference is reported. Terrain turns the wind, so some tens of degrees are normal. Beyond 45 degrees the result carries a caution into the wind map, the layout and the pack: a vane whose north offset is not what the settings say turns the whole wind rose, and with it the wake losses. The check needs the download; with reference files of your own it is skipped.
 
@@ -55,6 +55,8 @@ Every method here is a developer's screening method. The limits are part of the 
 
 **Energy.** PyWake computes gross and net energy with the Niayifar and Porté-Agel Gaussian wake model; Jensen and TurbOPark are run as cross-checks. Turbines are generic (PyWake's generic power and thrust curves from rating and rotor diameter) at the site's air density.
 
+**Air density.** Measured by the mast where it has a thermometer and a barometer, and carried to hub height. A mast with neither (a WindPRO export, an old one-height mast) takes the reanalysis temperature and surface pressure that come with the long-term download, carried from the reanalysis cell's elevation to the site with the standard lapse rate and the hypsometric equation. On five masts with a measured density this came within 2 % of it, and within 1 % on the three whose barometer worked. Without the download the standard atmosphere is used and the result says so: it is colder than warm climates, and its air was 3 to 7 % too dense on the same five masts.
+
 **Losses and uncertainty.** A table of losses other than wakes (default 9.1 %) and an uncertainty budget give P50, P75 and P90 for the long-term average, a 10-year average and a single year, assuming a normal distribution.
 
 **Stops at.** Not a global optimiser. Generic curves, not a manufacturer's. Default losses and uncertainties are assumptions to edit. No curtailment study, no electrical design. The result also shows what the energy would be if no turbine were windier than the mast: that difference rests on the wind map alone, and when it is more than a tenth of the P50 the result says so, with the P50 it would leave. Turbines sit on cell centres: on ridges narrower than the cells a coarse grid misses the crest and loses energy.
@@ -64,6 +66,8 @@ Every method here is a developer's screening method. The limits are part of the 
 **Noise.** ISO 9613-2 general method, A-weighted at 500 Hz, alternative ground attenuation, air absorption 1.9 dB/km, receiver 4 m above ground. Terrain sets heights and the mean path height; screening by hills and buildings is ignored.
 
 **Shadow flicker.** Astronomical worst case, every minute of a year: the sun at least 3° above the horizon, homes within 10 rotor diameters, the rotor always turning and facing the sun, nothing in between. Reported as hours a year and the longest day, with an upper bound on the operating time lost if turbines stopped whenever a home could be affected.
+
+**Many homes.** A building survey can hold tens of thousands of points. All of them are assessed and written to the two CSV files; the project and the pack keep the 500 most affected in each list, and the maps draw the rest as dots.
 
 **Stops at.** Screening. No background noise survey, no octave bands, no manufacturer sound data, no tonal or low-frequency assessment; no cloud statistics or obstacles for flicker. The ground formula used here gives lower noise levels far from the turbines than the general method with a ground factor of 0.5 that formal wind-farm noise studies use; against an independent screening of a real layout the two were close where levels approach usual limits and drifted apart with distance. The flicker hours matched that screening at homes computed at the same point.
 

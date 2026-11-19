@@ -216,7 +216,7 @@
     if (key === 'longterm') return `Factor ${num(r.factor, 3)}: long-term mean ${num(r.long_term, 2)} m/s at ${num(r.height_m, 0)} m`;
     if (key === 'map') return `${num(r.min_ws, 1)} to ${num(r.max_ws, 1)} m/s at ${num(r.height_m, 0)} m over ${num(r.area_km2, 0)} km²`;
     if (key === 'layout') return `${r.n_placed} turbines, ${num(r.capacity_mw, 1)} MW, P50 ${num(r.p50_gwh, 0)} GWh a year`;
-    if (key === 'environment') return `${r.noise.over_limit} of ${r.noise.n_receptors} homes over the noise level, ${r.flicker.over_limit} over a flicker limit`;
+    if (key === 'environment') return `${num(r.noise.over_limit, 0)} of ${num(r.noise.n_receptors, 0)} homes over the noise level, ${num(r.flicker.over_limit, 0)} over a flicker limit`;
     return `${r.files.length + 1} files in ${r.folder}`;
   }
 
@@ -443,9 +443,9 @@
       const shown = fl.receptors.filter(x => x.hours_per_year > 0).slice(0, 12);
       const fRows = shown.map(x => [esc(x.name), num(x.hours_per_year, 1), num(x.max_minutes_per_day, 0), x.days_with_flicker, esc(x.turbines.join(', ')), x.over_limit ? state('over', 'Over') : state('ok', 'Within')]);
       return `<div class="tiles">
-          ${tile('Homes over the noise level', `${nz.over_limit} <small>of ${nz.n_receptors}</small>`, `${nz.over_limit_with_uncertainty} with a ${num(nz.uncertainty_db, 0)} dB allowance`)}
+          ${tile('Homes over the noise level', `${num(nz.over_limit, 0)} <small>of ${num(nz.n_receptors, 0)}</small>`, `${num(nz.over_limit_with_uncertainty, 0)} with a ${num(nz.uncertainty_db, 0)} dB allowance`)}
           ${tile('Highest noise level', `${num(nz.highest_dba, 1)} <small>dB(A)</small>`, `level used: ${num(nz.limit_dba, 0)} dB(A)`)}
-          ${tile('Homes over a flicker limit', `${fl.over_limit} <small>of ${fl.n_receptors}</small>`, `${fl.with_any_flicker} could see any flicker`)}
+          ${tile('Homes over a flicker limit', `${num(fl.over_limit, 0)} <small>of ${num(fl.n_receptors, 0)}</small>`, `${num(fl.with_any_flicker, 0)} could see any flicker`)}
           ${tile('Most flicker, worst case', `${num(fl.highest_hours, 0)} <small>h a year</small>`, `longest day ${num(fl.highest_minutes_day, 0)} min`)}
           ${tile('Cost of stopping for flicker', `${num(fl.shutdown_upper_bound_pct, 2)} <small>%</small>`, 'of operating time, at most')}
         </div>
@@ -453,7 +453,7 @@
           <a href="${fileUrl(r.noise_map, st.result.at)}" target="_blank" rel="noopener"><img class="map" src="${fileUrl(r.noise_map, st.result.at)}" alt="Map of turbine noise with the homes"></a>
           <a href="${fileUrl(r.flicker_map, st.result.at)}" target="_blank" rel="noopener"><img class="map" src="${fileUrl(r.flicker_map, st.result.at)}" alt="Map of homes within range of shadow flicker"></a>
         </div>
-        ${card(`Noise at homes <small>the ${nRows.length} highest of ${nz.n_receptors}</small>`, table(['Home', 'Level, dB(A)', 'With allowance', 'Nearest turbine', 'Distance, m', `Against ${num(nz.limit_dba, 0)} dB(A)`], nRows, [1, 2, 4])
+        ${card(`Noise at homes <small>the ${nRows.length} highest of ${num(nz.n_receptors, 0)}</small>`, table(['Home', 'Level, dB(A)', 'With allowance', 'Nearest turbine', 'Distance, m', `Against ${num(nz.limit_dba, 0)} dB(A)`], nRows, [1, 2, 4])
           + `<div class="links" style="margin-top:12px"><a class="btn" href="${fileUrl(r.noise_csv)}">Download every home</a></div><p class="hint">${esc(nz.method)}.</p>`)}
         ${card(`Shadow flicker at homes <small>${shown.length ? `the ${shown.length} highest of ${fl.with_any_flicker} affected` : 'none affected'}</small>`, (shown.length ? table(['Home', 'Hours a year', 'Longest day, min', 'Days', 'Turbines', 'Against the limits'], fRows, [1, 2, 3]) : '<p class="note">No home is within range.</p>')
           + `<div class="links" style="margin-top:12px"><a class="btn" href="${fileUrl(r.flicker_csv)}">Download every home</a></div><p class="hint">${esc(fl.method)}.</p>`)}

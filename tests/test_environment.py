@@ -101,3 +101,44 @@ def test_noise_map_agrees_with_receptor_figures_and_falls_with_distance():
     hill = noise.at_receptors(valley, t, [{"name": "hilltop", "x": 1500.0, "y": 0.0}], 120.0, 105.0)["receptors"][0]
     flat15 = noise.at_receptors(g, t, [{"name": "flat", "x": 1500.0, "y": 0.0}], 120.0, 105.0)["receptors"][0]
     assert abs(hill["level_dba"] - flat15["level_dba"]) < 2.5
+
+
+def test_noise_for_thousands_of_homes_matches_the_sum_pair_by_pair():
+    """Homes are worked through in blocks of arrays. Each level must equal the one built up one turbine at a time
+    over the terrain profile, as the method is written."""
+    hills = tr.from_function(lambda x, y: 900.0 + 80.0 * np.sin(x / 700.0) * np.cos(y / 900.0) + 0.02 * x, 0.0, 0.0, half_km=4, res=50)
+    turbines = [{"id": "T1", "x": -600.0, "y": 300.0}, {"id": "T2", "x": 200.0, "y": -100.0}, {"id": "T3", "x": 900.0, "y": 650.0}]
+    rng = np.random.default_rng(3)
+    homes = [{"name": f"H{i:04d}", "x": float(x), "y": float(y)} for i, (x, y) in enumerate(rng.uniform(-3800, 3800, (7000, 2)))]
+    res = noise.at_receptors(hills, turbines, homes, 100.0, 105.0, limit=40.0)        # 7,000 homes: three blocks
+    assert res["n_receptors"] == 7000 and [r["level_dba"] for r in res["receptors"]] == sorted((r["level_dba"] for r in res["receptors"]), reverse=True)
+    rows = {r["name"]: r for r in res["receptors"]}
+    for k in (0, 1, 3332, 3333, 3334, 6665, 6666, 6999):                               # both sides of every block edge
+        h = homes[k]
+        zr = float(hills.sample(h["x"], h["y"])) + noise.RECEIVER_HEIGHT
+        each, dists = [], []
+        for t in turbines:
+            zs = float(hills.sample(t["x"], t["y"])) + 100.0
+            dp = math.hypot(t["x"] - h["x"], t["y"] - h["y"])
+            hm = noise._mean_path_height(hills, t["x"], t["y"], zs, h["x"], h["y"], zr)
+            assert isinstance(hm, float)
+            each.append(float(noise.level(105.0, math.hypot(dp, zs - zr), dp, 100.0, noise.RECEIVER_HEIGHT, hm)))
+            dists.append(dp)
+        row = rows[h["name"]]
+        assert row["level_dba"] == pytest.approx(float(noise.add_levels(each)), abs=0.051)
+        assert row["loudest_single_dba"] == pytest.approx(max(each), abs=0.051)
+        assert row["distance_m"] == round(min(dists)) and row["nearest_turbine"] == turbines[int(np.argmin(dists))]["id"]
+    assert res["nearest_home_m"] == min(r["distance_m"] for r in res["receptors"])
+    assert res["over_limit"] == sum(r["level_dba"] > 40.0 for r in res["receptors"]) > 0
+
+
+def test_homes_out_of_range_of_every_turbine_get_no_flicker_and_cost_nothing():
+    g = flat()
+    t = [{"id": "T01", "x": 0.0, "y": 0.0}]
+    homes = [{"name": "near", "x": 300.0, "y": 0.0}] + [{"name": f"far{i}", "x": 2500.0, "y": -2000.0 + i} for i in range(3000)]
+    res = flicker.at_receptors(g, t, homes, 100.0, 120.0, 2027, step_min=10)          # range: 10 rotors = 1,200 m
+    assert res["n_receptors"] == 3001 and res["with_any_flicker"] == 1 and res["receptors"][0]["name"] == "near"
+    far = res["receptors"][-1]
+    assert far["hours_per_year"] == 0.0 and far["turbines"] == [] and not far["over_limit"] and far["nearest_turbine_m"] > 2500
+    alone = flicker.at_receptors(g, t, homes[:1], 100.0, 120.0, 2027, step_min=10)     # the near home: the same with or without the others
+    assert alone["receptors"][0] == res["receptors"][0] and alone["per_turbine_hours"] == res["per_turbine_hours"]

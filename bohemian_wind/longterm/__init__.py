@@ -8,6 +8,10 @@ Method (one method, on purpose; more will follow):
   measured. This assumes the mast-to-reference ratio holds in the months not measured, and says so.
 - The last reference months are checked before use: NASA POWER appends another model (GEOS-IT) to the end of the
   MERRA-2 series for its latest weeks, and such a month can break the mast-to-reference relation.
+- Air for masts with no thermometer or barometer: the download also brings the reanalysis temperature at 2 m and
+  surface pressure. Their long-term means, with the elevation of the reanalysis cell, go to the energy step, which
+  carries them to the site for the air density. On masts with a measured density this estimate came within 2 % of
+  it; the standard atmosphere, the fallback before, was 3 to 7 % too dense at warm sites.
 - Vane north check: the mast's daily wind direction is set against the reanalysis direction at 50 m on days when
   both read 5 m/s or more. Terrain turns the wind, so some tens of degrees are normal; a large, steady difference
   points to a vane whose north offset is not what the settings say.
@@ -32,6 +36,8 @@ POWER_CREDIT = "Long-term index: NASA Langley Research Center POWER Project (MER
 REF_JUMP = 0.25      # a trailing reference month whose mast-to-reference ratio is this far off is left out
 LT_YEARS = 20
 TAIL_MONTHS = 4        # how far back from the reference's last month its tail can be of a different make
+POWER_MONTHLY = "WS50M,T2M,PS"   # wind speed for the index; air temperature and surface pressure for the air density of
+#                                  masts that measure neither (asked for with the same download)
 VANE_MIN_WS, VANE_MIN_DAYS = 5.0, 20   # the vane check: days with this wind on both sides, and how many it takes
 VANE_LIMIT_DEG = 45.0  # mast against reanalysis direction: beyond this, the vane's north is worth a look
 VANE_SPREAD_DEG = 90.0  # the middle half of the days spread wider than this: the comparison says nothing
@@ -56,26 +62,56 @@ def fetch_power(lat: float, lon: float, dest_dir, start_year: int = 2001, today:
     dest = Path(dest_dir)
     dest.mkdir(parents=True, exist_ok=True)
     out = {}
-    jobs = [("monthly", "monthly", str(start_year), str(today.year - 1), dest / "power_monthly.json", "WS50M"),
+    jobs = [("monthly", "monthly", str(start_year), str(today.year - 1), dest / "power_monthly.json", POWER_MONTHLY),
             ("daily", "daily", f"{today.year}0101", f"{today:%Y%m%d}", dest / "power_daily.json", "WS50M")]
     if period:
         jobs.append(("measured", "daily", period[0].replace("-", ""), period[1].replace("-", ""),
                      dest / "power_daily_measured.json", "WS50M,WD50M"))
     for key, step, a, b, path, parameters in jobs:
-        url = power_url(lat, lon, step, a, b, parameters)
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "bohemian-wind"})
-            with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310 (fixed https host)
-                body = r.read()
-            json.loads(body)["properties"]["parameter"]["WS50M"]
-        except (urllib.error.URLError, OSError, KeyError, ValueError) as e:
+        body, failure = None, None
+        for params in dict.fromkeys((parameters, "WS50M") if key == "monthly" else (parameters,)):   # the wind speed alone,
+            url = power_url(lat, lon, step, a, b, params)                                          # if the extras are refused
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "bohemian-wind"})
+                with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310 (fixed https host)
+                    got = r.read()
+                json.loads(got)["properties"]["parameter"]["WS50M"]
+                body = got
+                break
+            except (urllib.error.URLError, OSError, KeyError, ValueError) as e:
+                failure = e
+        if body is None:
             if key != "monthly" and "monthly" in out:
                 continue        # the current year and the vane check are extras: complete years are enough
-            raise ReferenceError_(f"Could not download the reference data from NASA POWER ({e}). Check the internet "
-                                  "connection, or download the file in a browser and choose 'Use a file'.") from e
+            raise ReferenceError_(f"Could not download the reference data from NASA POWER ({failure}). Check the internet "
+                                  "connection, or download the file in a browser and choose 'Use a file'.") from failure
         path.write_bytes(body)
         out[key] = str(path)
     return out
+
+
+def reference_air(monthly_path, first_year: int | None = None, last_year: int | None = None) -> dict | None:
+    """Long-term mean air temperature at 2 m and surface pressure of the reanalysis cell, with the cell's own
+    elevation, from a NASA POWER monthly file that holds them (T2M, PS). None when the file does not: the energy
+    step then falls back on the standard atmosphere. Used for the air density of masts that measure neither."""
+    try:
+        j = json.loads(Path(monthly_path).read_text(encoding="utf-8"))
+        par = j["properties"]["parameter"]
+        elevation = float(j["geometry"]["coordinates"][2])
+        series = {"t2m_c": par["T2M"], "ps_kpa": par["PS"]}
+    except (OSError, KeyError, ValueError, TypeError, IndexError):
+        return None
+    out = {}
+    for name, values in series.items():
+        vals = [float(v) for k, v in values.items()
+                if len(k) == 6 and k[4:] != "13" and float(v) > -900
+                and (first_year is None or int(k[:4]) >= first_year) and (last_year is None or int(k[:4]) <= last_year)]
+        if len(vals) < 12:
+            return None
+        out[name] = round(sum(vals) / len(vals), 3)
+    if not (-60.0 < out["t2m_c"] < 60.0 and 30.0 < out["ps_kpa"] < 110.0):
+        return None
+    return {**out, "elevation_m": round(elevation, 1), "months": len(vals), "source": "NASA POWER, MERRA-2"}
 
 
 def vane_check(clim: dict, daily_path, offset: float = 0.0) -> dict | None:

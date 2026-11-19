@@ -40,38 +40,49 @@ def add_levels(levels, axis=0):
     return 10.0 * np.log10(np.sum(10.0 ** (np.asarray(levels, dtype=float) / 10.0), axis=axis))
 
 
-def _mean_path_height(grid: Grid, xs, ys, zs_abs, xr, yr, zr_abs) -> float:
+def _mean_path_height(grid: Grid, xs, ys, zs_abs, xr, yr, zr_abs):
+    """Mean height of the straight sound path above the ground, from the terrain profile under it. Takes single
+    values or arrays that broadcast together (sources against receivers); the last axis added is the profile."""
     t = (np.arange(PROFILE_POINTS) + 0.5) / PROFILE_POINTS
+    xs, ys, zs_abs, xr, yr, zr_abs = (np.asarray(v, dtype=float)[..., None] for v in (xs, ys, zs_abs, xr, yr, zr_abs))
     ground = grid.sample(xs + t * (xr - xs), ys + t * (yr - ys))
-    return float(np.maximum(zs_abs + t * (zr_abs - zs_abs) - ground, 0.0).mean())
+    hm = np.maximum(zs_abs + t * (zr_abs - zs_abs) - ground, 0.0).mean(axis=-1)
+    return float(hm) if hm.ndim == 0 else hm
 
 
 def at_receptors(grid: Grid, turbines: list, receptors: list, hub_m: float, lw: float, limit: float = 45.0,
                  uncertainty_db: float = 2.0, alpha: float = ALPHA_500HZ, receiver_height: float = RECEIVER_HEIGHT) -> dict:
-    """turbines, receptors: dicts with x, y (local metres) and id / name. Returns a row per receptor and totals."""
+    """turbines, receptors: dicts with x, y (local metres) and id / name. Returns a row per receptor and totals.
+    Receptors are worked through in blocks, so that tens of thousands of homes take seconds, not minutes."""
     rows = []
     tx = np.array([t["x"] for t in turbines], dtype=float)
     ty = np.array([t["y"] for t in turbines], dtype=float)
     tz = grid.sample(tx, ty) + hub_m
-    for rc in receptors:
-        zr_ground = float(grid.sample(rc["x"], rc["y"]))
-        zr = zr_ground + receiver_height
-        dp = np.hypot(tx - rc["x"], ty - rc["y"])
-        d = np.sqrt(dp ** 2 + (tz - zr) ** 2)
-        hm = np.array([_mean_path_height(grid, tx[i], ty[i], tz[i], rc["x"], rc["y"], zr) for i in range(len(tx))])
+    rx_all = np.array([rc["x"] for rc in receptors], dtype=float)
+    ry_all = np.array([rc["y"] for rc in receptors], dtype=float)
+    block = max(1, int(400_000 // max(len(tx) * PROFILE_POINTS, 1)))        # about 400,000 profile points at a time
+    for i0 in range(0, len(receptors), block):
+        rx, ry = rx_all[i0:i0 + block, None], ry_all[i0:i0 + block, None]     # [receptor, turbine]
+        zr = grid.sample(rx, ry) + receiver_height
+        dp = np.hypot(tx[None, :] - rx, ty[None, :] - ry)
+        d = np.sqrt(dp ** 2 + (tz[None, :] - zr) ** 2)
+        hm = _mean_path_height(grid, tx[None, :], ty[None, :], tz[None, :], rx, ry, zr)
         each = level(lw, d, dp, hub_m, receiver_height, hm, alpha)
-        total = float(add_levels(each))
-        j = int(np.argmin(dp))
-        rows.append({"name": rc["name"], "level_dba": round(total, 1), "level_plus_uncertainty_dba": round(total + uncertainty_db, 1),
-                     "nearest_turbine": turbines[j].get("id", str(j + 1)), "distance_m": round(float(dp[j]), 0),
-                     "loudest_single_dba": round(float(each.max()), 1), "over_limit": bool(total > limit),
-                     "over_limit_with_uncertainty": bool(total + uncertainty_db > limit),
-                     "lat": rc.get("lat"), "lon": rc.get("lon"), "x": rc["x"], "y": rc["y"]})
+        total = add_levels(each, axis=1)
+        near = np.argmin(dp, axis=1)
+        for k, rc in enumerate(receptors[i0:i0 + block]):
+            j, tot = int(near[k]), round(float(total[k]), 1)      # the verdict goes by the level as it is shown
+            rows.append({"name": rc["name"], "level_dba": tot, "level_plus_uncertainty_dba": round(tot + uncertainty_db, 1),
+                         "nearest_turbine": turbines[j].get("id", str(j + 1)), "distance_m": round(float(dp[k, j]), 0),
+                         "loudest_single_dba": round(float(each[k].max()), 1), "over_limit": bool(tot > limit),
+                         "over_limit_with_uncertainty": bool(round(tot + uncertainty_db, 1) > limit),
+                         "lat": rc.get("lat"), "lon": rc.get("lon"), "x": rc["x"], "y": rc["y"]})
     rows.sort(key=lambda r: -r["level_dba"])
     return {"receptors": rows, "limit_dba": limit, "sound_power_dba": lw, "uncertainty_db": uncertainty_db,
             "over_limit": sum(r["over_limit"] for r in rows),
             "over_limit_with_uncertainty": sum(r["over_limit_with_uncertainty"] for r in rows),
             "highest_dba": rows[0]["level_dba"] if rows else None, "n_receptors": len(rows),
+            "nearest_home_m": min((r["distance_m"] for r in rows), default=None),
             "method": "ISO 9613-2 general method, A-weighted at 500 Hz, alternative ground attenuation; "
                       f"air absorption {alpha:g} dB/km; receiver {receiver_height:g} m above ground; terrain screening ignored"}
 

@@ -183,9 +183,11 @@ def wind_map(grid: Grid, mean_ws: np.ndarray, path, *, height_m: float, theme: s
         _feature_lines(ax, grid, exclusions, t["muted"], lw=0.9)
         handles.append(Line2D([], [], color=t["muted"], lw=0.9, label="Exclusion zones, roads and lines"))
     if receptors:
-        ax.plot([r["x"] / 1000 for r in receptors], [r["y"] / 1000 for r in receptors], marker="s", ms=3.6, mfc=t["home"],
-                mec=t["surface"], mew=0.6, ls="none", zorder=5)
-        handles.append(Line2D([], [], marker="s", ms=5, mfc=t["home"], mec=t["surface"], mew=0.6, ls="none", label="Home"))
+        ms, mew, alpha = _marker(len(receptors), 3.6, 0.9)        # a survey of thousands of buildings: dots, not a carpet
+        ax.plot([r["x"] / 1000 for r in receptors], [r["y"] / 1000 for r in receptors], marker="s", ms=ms, mfc=t["home"],
+                mec=t["surface"], mew=min(mew, 0.6), alpha=alpha, ls="none", zorder=5)
+        handles.append(Line2D([], [], marker="s", ms=5, mfc=t["home"], mec=t["surface"], mew=0.6, ls="none",
+                              label="Home" if len(receptors) <= MANY_POINTS else f"Home ({len(receptors):,})"))
     handles.append(_mast(ax, t, mast_xy))
     if turbines:
         handles.append(_turbines(ax, t, turbines))
@@ -198,20 +200,33 @@ def wind_map(grid: Grid, mean_ws: np.ndarray, path, *, height_m: float, theme: s
     return _save(fig, path)
 
 
+MANY_POINTS = 300      # beyond this many homes of one status the markers shrink, down to dots
+
+
+def _marker(n: int, size: float, least: float) -> tuple:
+    """(marker size, edge width, opacity) for n markers of one kind: full size up to MANY_POINTS, then smaller with
+    the square root of the count, without the outline that would turn a dense survey into a solid carpet."""
+    if n <= MANY_POINTS:
+        return size, 1.0, 1.0
+    return max(least, size * (MANY_POINTS / n) ** 0.5), 0.0, 0.7
+
+
 def _status_points(ax, t: dict, receptors: list, over_key: str, labels: tuple) -> list:
     ok = [r for r in receptors if not r.get(over_key)]
     bad = [r for r in receptors if r.get(over_key)]
     handles = []
     if ok:
-        ax.plot([r["x"] / 1000 for r in ok], [r["y"] / 1000 for r in ok], marker="o", ms=5.5, mfc=STATUS["good"],
-                mec=t["surface"], mew=1.0, ls="none", zorder=6)
+        ms, mew, alpha = _marker(len(ok), 5.5, 1.1)
+        ax.plot([r["x"] / 1000 for r in ok], [r["y"] / 1000 for r in ok], marker="o", ms=ms, mfc=STATUS["good"],
+                mec=t["surface"], mew=mew, alpha=alpha, ls="none", zorder=6)
         handles.append(Line2D([], [], marker="o", ms=6, mfc=STATUS["good"], mec=t["surface"], mew=1.0, ls="none",
-                              label=f"{labels[0]} ({len(ok)})"))
+                              label=f"{labels[0]} ({len(ok):,})"))
     if bad:
-        ax.plot([r["x"] / 1000 for r in bad], [r["y"] / 1000 for r in bad], marker="X", ms=8, mfc=STATUS["critical"],
-                mec=t["surface"], mew=1.0, ls="none", zorder=7)
+        ms, mew, alpha = _marker(len(bad), 8.0, 3.0)
+        ax.plot([r["x"] / 1000 for r in bad], [r["y"] / 1000 for r in bad], marker="X", ms=ms, mfc=STATUS["critical"],
+                mec=t["surface"], mew=min(mew, 0.4) if len(bad) > MANY_POINTS else mew, alpha=max(alpha, 0.9), ls="none", zorder=7)
         handles.append(Line2D([], [], marker="X", ms=8, mfc=STATUS["critical"], mec=t["surface"], mew=1.0, ls="none",
-                              label=f"{labels[1]} ({len(bad)})"))
+                              label=f"{labels[1]} ({len(bad):,})"))
     return handles
 
 

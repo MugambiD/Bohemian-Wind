@@ -56,9 +56,16 @@ def at_receptors(grid: Grid, turbines: list, receptors: list, hub_m: float, roto
         ez = float(grid.sample(rc["x"], rc["y"])) + eye_height
         v = np.column_stack([tx - rc["x"], ty - rc["y"], tz - ez])
         dist = np.linalg.norm(v, axis=1)
+        in_range = np.flatnonzero((dist <= max_distance_rotors * rotor_m) & (dist > R))
+        if not len(in_range):           # most homes of a large survey: no turbine near enough, nothing to work out
+            rows.append({"name": rc["name"], "hours_per_year": 0.0, "max_minutes_per_day": 0.0, "days_with_flicker": 0,
+                         "over_hours_limit": False, "over_day_limit": False, "over_limit": False, "turbines": [],
+                         "nearest_turbine_m": round(float(np.hypot(tx - rc["x"], ty - rc["y"]).min()), 0) if len(tx) else None,
+                         "lat": rc.get("lat"), "lon": rc.get("lon"), "x": rc["x"], "y": rc["y"]})
+            continue
         shaded = np.zeros(len(t), bool)
         causes = []
-        for j in np.flatnonzero((dist <= max_distance_rotors * rotor_m) & (dist > R)):
+        for j in in_range:
             cos_lim = np.sqrt(1.0 - (R / dist[j]) ** 2)
             hit = sun @ (v[j] / dist[j]) >= cos_lim
             if hit.any():

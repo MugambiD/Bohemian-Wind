@@ -1,5 +1,6 @@
 """The whole chain on the invented demo project, the daily intake, the permitting pack and the application's
 programming interface. Run: python -m pytest tests/test_app.py -q"""
+import csv
 import json
 import sys
 import threading
@@ -398,3 +399,80 @@ def test_the_vane_is_checked_against_the_reanalysis_when_the_reference_is_downlo
     # reference files of one's own: no directions to compare, no check
     p.update("longterm", {"source": "file"})
     assert p.run("longterm", log=quiet)["vane_check"] is None
+
+
+def test_air_density_of_a_mast_without_thermometer_comes_from_the_reference(tmp_path):
+    from bohemian_wind.energy import turbine
+    p = demo.create(tmp_path / "Demo Ridge", today=TODAY)
+    p.run("data", log=quiet)
+    hand_off = p.folder / p.result("data")["climate"]
+    c = json.loads(hand_off.read_text("utf-8"))
+    measured = c["density"]["mean"]
+    c["density"] = None                                    # as for a mast with no thermometer and no barometer
+    hand_off.write_text(json.dumps(c), encoding="utf-8")
+    ref = p.folder / "longterm" / "demo_reference_monthly.json"
+    j = json.loads(ref.read_text("utf-8"))
+    months = [k for k in j["properties"]["parameter"]["WS50M"] if k[4:] != "13"]
+    j["properties"]["parameter"]["T2M"] = {k: 21.0 for k in months}      # a warm cell 240 m below the site (invented)
+    j["properties"]["parameter"]["PS"] = {k: 86.0 for k in months}
+    j["geometry"]["coordinates"][2] = 1400.0
+    ref.write_text(json.dumps(j), encoding="utf-8")
+    air = p.run("longterm", log=quiet)["reference_air"]
+    assert air["t2m_c"] == 21.0 and air["ps_kpa"] == 86.0 and air["elevation_m"] == 1400.0 and air["months"] == 240
+    p.run("map", log=quiet)
+    lay = p.run("layout", log=quiet)
+    hub = lay["turbine"]["hub_m"]
+    note = next(n for n in lay["notes"] if n.startswith("Air density at hub height"))
+    assert "not measured: long-term temperature and pressure of the reanalysis (NASA POWER, MERRA-2)" in note
+    assert lay["rho_hub"] == pytest.approx(turbine.reference_density(p.site()["elevation_m"], hub, air), rel=1e-9)
+    isa = turbine.air_density(p.site()["elevation_m"], hub)[0]
+    assert 0.9 < lay["rho_hub"] < isa and abs(lay["rho_hub"] / measured - 1) < 0.06
+    # a reference with wind speeds only: the standard atmosphere, and the note says what is wrong with it
+    for name in ("T2M", "PS"):
+        del j["properties"]["parameter"][name]
+    ref.write_text(json.dumps(j), encoding="utf-8")
+    assert p.run("longterm", log=quiet)["reference_air"] is None
+    again = p.run("layout", log=quiet)
+    assert again["rho_hub"] == pytest.approx(isa) and "too dense for a warm climate" in " ".join(again["notes"])
+    assert again["gross_gwh"] > lay["gross_gwh"]                                   # denser air, more energy
+
+
+def test_a_survey_of_many_homes_stays_out_of_the_project_file(tmp_path, monkeypatch):
+    from bohemian_wind import maps, project
+    monkeypatch.setattr(project, "LISTED_HOMES", 40)
+    p = demo.create(tmp_path / "Demo Ridge", today=TODAY)
+    for step in ("data", "longterm", "map"):
+        p.run(step, log=quiet)
+    site = p.site()
+    rng = np.random.default_rng(8)
+    homes = tmp_path / "survey.csv"                           # 130 buildings scattered over 7 km (invented)
+    homes.write_text("name,lat,lon\n" + "".join(
+        f"B{i:03d},{site['lat'] + dy:.6f},{site['lon'] + dx:.6f}\n" for i, (dx, dy) in enumerate(rng.uniform(-0.032, 0.032, (130, 2)))),
+        encoding="utf-8")
+    p.attach("receptors", homes)
+    p.run("layout", log=quiet)
+    lines = []
+    env = p.run("environment", log=lines.append)
+    nz, fl = env["noise"], env["flicker"]
+    assert nz["n_receptors"] == fl["n_receptors"] == 130 and len(nz["receptors"]) == len(fl["receptors"]) == 40
+    assert nz["receptors_listed"] == 40 and nz["receptors"][0]["level_dba"] == nz["highest_dba"]
+    assert [r["level_dba"] for r in nz["receptors"]] == sorted((r["level_dba"] for r in nz["receptors"]), reverse=True)
+    assert any("keeps the 40 most affected of the 130 homes" in ln for ln in lines)
+    for name in ("noise_at_homes.csv", "flicker_at_homes.csv"):                    # every home is in the tables
+        assert len((p.folder / "environment" / name).read_text("utf-8").strip().splitlines()) == 131
+    listed = {r["name"] for r in nz["receptors"]}
+    rows = list(csv.DictReader(open(p.folder / "environment" / "noise_at_homes.csv", encoding="utf-8")))
+    assert min(float(r["level_dba"]) for r in rows if r["home"] in listed) >= max(float(r["level_dba"]) for r in rows if r["home"] not in listed)
+    assert nz["over_limit"] == sum(r["over_limit"] == "yes" for r in rows)          # the counts cover all 130
+    assert nz["nearest_home_m"] == min(float(r["distance_m"]) for r in rows)
+    pack = p.run("pack", log=quiet)
+    folder = p.folder / pack["folder"]
+    gis = json.loads((folder / "layout.geojson").read_text("utf-8"))
+    assert sum(f["properties"]["kind"] == "home" for f in gis["features"]) == 40
+    page = next(folder.glob("*.html")).read_text("utf-8")
+    assert "130 homes assessed" in page and "The 25 highest of 130 homes are shown" in page
+    assert "the 40 homes with the highest noise levels (of 130 assessed)" in (page + (folder / "README.txt").read_text("utf-8") if (folder / "README.txt").is_file() else page)
+    # markers: full size for a few homes, dots for a survey
+    assert maps._marker(120, 5.5, 1.1) == (5.5, 1.0, 1.0)
+    small = maps._marker(40000, 5.5, 1.1)
+    assert small[0] == 1.1 and small[1] == 0.0 and small[2] < 1.0 and 1.1 < maps._marker(1200, 5.5, 1.1)[0] < 5.5

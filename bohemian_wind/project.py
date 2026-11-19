@@ -38,6 +38,8 @@ ESTIMATE_NOTE = ("Developer estimate prepared by Bohemian Renewables with open-s
                  "bankable energy yield assessment and must not be used for financing decisions.")
 DEFAULT_ALPHA = 0.14
 MAX_CELLS = 1.6e6        # terrain cells in one wind map (25 km each way in 50 m cells): beyond it the flow model's memory runs to gigabytes
+LISTED_HOMES = 500       # homes kept in the project file per list (noise, flicker), the most affected first; with more
+#                          homes than this the full lists live in the CSV files only, or the project file runs to tens of MB
 
 
 class ProjectError(RuntimeError):
@@ -443,6 +445,7 @@ class Project:
         res["reference_first"], res["reference_last"] = str(ref.index[0]), str(ref.index[-1])
         res["measured_height_m"] = clim["height_m"]
         res["vane_check"] = longterm.vane_check(clim, files.get("measured"), self.vane_offset()[0])
+        res["reference_air"] = longterm.reference_air(files["monthly"], *(res.get("lt_years") or (None, None)))
         if res["vane_check"] and res["vane_check"]["caution"]:
             res["cautions"].append(res["vane_check"]["caution"])
         self.path("longterm", "longterm.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
@@ -554,7 +557,8 @@ class Project:
         log(f"Buildable area: {rep['buildable_km2']:.1f} km2 after {len(rep['steps']) - 1} rules.")
         elev = site.get("elevation_m") if site.get("elevation_m") is not None else float(grid.sample(0.0, 0.0))
         d = clim.get("density") or {}
-        rho, rho_src = air_density(elev, turbine.hub_m, d.get("mean"), d.get("sensor_height_m"))
+        rho, rho_src = air_density(elev, turbine.hub_m, d.get("mean"), d.get("sensor_height_m"),
+                                   reference=(self.result("longterm") or {}).get("reference_air"))
         scale = self.speed_scale(clim)
         f_note = scale["basis"]
         alpha, a_note = self.alpha(clim)
@@ -658,7 +662,8 @@ class Project:
         turbines = lay["positions"]
         log(f"Noise at {len(receptors)} homes from {len(turbines)} turbines ...")
         nz = noise.at_receptors(grid, turbines, receptors, hub, lw, limit=limit)
-        log(f"  Highest level {nz['highest_dba']:.1f} dB(A); {nz['over_limit']} homes over {limit:g} dB(A).")
+        log(f"  Highest level {nz['highest_dba']:.1f} dB(A); {nz['over_limit']} homes over {limit:g} dB(A); the nearest "
+            f"home is {nz['nearest_home_m']:.0f} m from a turbine.")
         log(f"Shadow flicker for {year}, every minute of daylight ...")
         fl = flicker.at_receptors(grid, turbines, receptors, hub, rotor, year, step_min=1, limit_hours_year=h_lim,
                                   limit_min_day=m_lim)
@@ -688,6 +693,11 @@ class Project:
                 w.writerow([r["name"], r["lat"], r["lon"], r["hours_per_year"], r["max_minutes_per_day"], r["days_with_flicker"],
                             "yes" if r["over_limit"] else "no", " ".join(r["turbines"]), r["nearest_turbine_m"]])
         out["noise_csv"], out["flicker_csv"] = "environment/noise_at_homes.csv", "environment/flicker_at_homes.csv"
+        if len(receptors) > LISTED_HOMES:       # a survey of thousands of buildings: the project keeps the most affected
+            nz["receptors"], fl["receptors"] = nz["receptors"][:LISTED_HOMES], fl["receptors"][:LISTED_HOMES]
+            nz["receptors_listed"] = fl["receptors_listed"] = LISTED_HOMES
+            log(f"  The project keeps the {LISTED_HOMES} most affected of the {len(receptors):,} homes; every home is in "
+                "noise_at_homes.csv and flicker_at_homes.csv.")
         self.path("environment", "environment.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
         return self._store("environment", out)
 
