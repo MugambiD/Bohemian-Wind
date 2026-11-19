@@ -268,7 +268,7 @@ def test_windows_paths_are_given_in_their_long_form(monkeypatch):
     assert unpack._long("/projects/x").startswith("\\\\?\\")
     assert unpack._long("\\\\?\\C:\\already") == "\\\\?\\C:\\already"
     monkeypatch.setattr(sys, "platform", "linux")
-    assert unpack._long("/projects/x") == "/projects/x"
+    assert unpack._long("/projects/x") == os.path.abspath("/projects/x")      # elsewhere: the path as the system writes it
 
 
 def test_an_archive_that_changes_or_goes_takes_its_unpacked_files_with_it(mast, tmp_path):
