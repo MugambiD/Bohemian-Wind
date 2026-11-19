@@ -43,7 +43,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openfoam
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openfoam || echo "No OpenFOAM package for this Ubuntu: the CFD run test is skipped here (the Windows setup program's build runs it)"
       # The synthetic-mast tests plant known faults in a real year of mast data: brightwind's demo file (MIT licence),
       # taken from its published wheel and used here only, never copied into this repository. Nothing in the wheel is run.
       - name: Mast data for the synthetic-mast tests
