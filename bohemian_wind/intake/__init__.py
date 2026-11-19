@@ -70,7 +70,8 @@ def detect(path, also=None) -> dict:
             if len(files) > SCAN_LIMIT:
                 break
     if also is not None and Path(also).is_dir():
-        files += sorted(f for f in Path(also).rglob("*") if f.is_file() and f.name.lower().endswith(DATA_SUFFIXES))
+        files += sorted(f for f in Path(also).rglob("*") if f.is_file() and f.name.lower().endswith(DATA_SUFFIXES)
+                        and not any(part.startswith(".") for part in f.relative_to(also).parts))
     counts = {"rld": 0, "sympro_txt": 0, "toa5": 0, "nomad2": 0, "sdr": 0, "windpro": 0, "archives": 0, "rwd": 0}
     listed = {k: [] for k in FILE_LISTED}
     unread = {}                                # files with a data-like name that no reader recognised, by suffix

@@ -260,12 +260,26 @@ def _tar_named(exe: str, name: str, into: str, other: dict) -> bool:
     return True
 
 
+def _long(path) -> str:
+    """A path Windows takes past 259 characters (the extended form, \\\\?\\C:\\...); elsewhere the path as it is."""
+    text = str(path)
+    if text.startswith("\\\\"):            # already in that form, or a network path: left as it is
+        return text
+    full = os.path.abspath(text)
+    return "\\\\?\\" + full if sys.platform.startswith("win") else full
+
+
 def _with_tool(archive: Path, out: Path, other: dict, tool: tuple) -> list:
     """Unpack with one of the computer's programs: into a folder of its own first, from which only the logger
-    files are taken. Names inside the archive never decide where a file is written. The folder sits beside the
-    archive's own and has a short name: Windows allows a path 259 characters, and projects live deep."""
+    files are taken. Names inside the archive never decide where a file is written.
+
+    That folder is in the computer's own folder for passing files, which has a short path: the program recreates
+    the folders inside the archive, and a logger's archive can hold a folder name of 70 characters and more. Inside a
+    project kept deep in the user's folders, that went past the 259 characters Windows allows (seen on a real PC). The
+    files are read and moved with the long form of their paths, and the folder is removed without fail."""
     _, exe, how = tool
-    with tempfile.TemporaryDirectory(prefix=".u", dir=out.parent) as into:
+    into = tempfile.mkdtemp(prefix="bw-")
+    try:
         if how == "tar":
             _tar_into(exe, archive, into, other)
         elif how == "7z":
@@ -285,16 +299,21 @@ def _with_tool(archive: Path, out: Path, other: dict, tool: tuple) -> list:
             code, said, err = _run([exe, "x", "-y", "-o+", "-p-", str(archive), *[f"*{s}" for s in WANTED], into + os.sep])
             if code not in (0, 1):
                 raise UnpackError(_why(err or said))
-        files = []
-        for dirpath, dirs, names in os.walk(into):
-            files += [Path(dirpath) / n for n in names if _wanted(n) and not (Path(dirpath) / n).is_symlink()]
-        rel = {f.relative_to(into).as_posix(): f for f in files}
+        base = _long(into)
+        rel = {}
+        for dirpath, dirs, names in os.walk(base):
+            for n in names:
+                f = os.path.join(dirpath, n)
+                if _wanted(n) and not os.path.islink(f):
+                    rel[os.path.relpath(f, base).replace(os.sep, "/")] = f
         where = _targets(sorted(rel))
-        if sum(f.stat().st_size for f in files) > MAX_BYTES:
+        if sum(os.path.getsize(f) for f in rel.values()) > MAX_BYTES:
             raise UnpackError("it holds more than 8 GB of logger files, which no mast produces")
         for name, f in rel.items():
-            os.replace(f, out / where[name])
+            shutil.move(f, _long(out / where[name]))       # the computer's temporary folder may be on another drive
         return sorted(where.values())
+    finally:
+        shutil.rmtree(_long(into), ignore_errors=True)
 
 
 def _with_unrar_package(archive: Path, out: Path, other: dict) -> list:
@@ -393,6 +412,10 @@ def unpack(archives: list, base, dest, log=print, keep=None) -> dict:
     """
     base, dest = Path(base), paths.tidy(dest)
     names = _folders(archives, base)
+    if dest.is_dir():                         # working folders an earlier version left behind when it could not finish
+        for d in dest.iterdir():
+            if d.is_dir() and d.name.startswith((".u", ".opening-")):
+                shutil.rmtree(_long(d), ignore_errors=True)
     res = {"archives": len(archives), "opened": 0, "now": 0, "files": 0, "failed": [], "other": {}, "with": [], "notes": [],
            "dest": dest}
     announced = False

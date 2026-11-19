@@ -226,7 +226,49 @@ def test_the_unrar_program_is_asked_in_its_own_words(mast, tmp_path, monkeypatch
     assert asked[0] == ["C:/Program Files/WinRAR/UnRAR.exe", "lb", "-p-", str(data / "month.rar")] and r["other"] == {".rld": 1}
     cmd = asked[1]
     assert cmd[:5] == ["C:/Program Files/WinRAR/UnRAR.exe", "x", "-y", "-o+", "-p-"] and cmd[5] == str(data / "month.rar")
-    assert cmd[6:9] == ["*.dat", "*.txt", "*.csv"] and cmd[9].endswith(("/", "\\")) and Path(cmd[9]).parent == dest and Path(cmd[9]).name.startswith(".u")
+    assert cmd[6:9] == ["*.dat", "*.txt", "*.csv"] and cmd[9].endswith(("/", "\\")) and Path(cmd[9]).name.startswith("bw-")      # the short temporary folder
+
+
+def test_a_deep_folder_inside_an_archive_is_unpacked_in_the_computers_short_temporary_folder(mast, tmp_path, monkeypatch):
+    """A logger's archive held a folder of 74 characters with a subfolder of 63. Unpacked beside a project kept deep in
+    the user's folders, its files passed the 259 characters Windows allows, and the archive counted as not opened
+    (seen on a real PC). The program now unpacks into the computer's own temporary folder, which has a short path,
+    and that folder is gone afterwards whatever happened."""
+    if not OPENS_RAR:
+        pytest.skip("no program on this computer opens RAR archives")
+    files, _ = mast
+    names = sorted(files)
+    deep = "Mast_ThirdPeriod_DailyDataFiles_20250526_20250617_With_Wrong_Time_UTC+1"
+    sub = deep + "/Programs_of_the_third_period_20250526-20250617_GPS_had_UTC+1_instead_of_+2"
+    data, dest, systemp = tmp_path / "data", tmp_path / "project" / "converted" / "data", tmp_path / "systemp"
+    data.mkdir()
+    systemp.mkdir()
+    write_rar(data / "month.rar", {f"{deep}/{names[0]}": files[names[0]], f"{deep}/{names[1]}": files[names[1]],
+                                   f"{sub}/program.CR1X": b"' a logger program", f"{deep}/notes.txt": b"clock was off\n"})
+    monkeypatch.setattr(unpack.tempfile, "tempdir", str(systemp))
+    asked = []
+    real = unpack._run
+    monkeypatch.setattr(unpack, "_run", lambda cmd: (asked.append(cmd), real(cmd))[1])
+    r = unpack.unpack(unpack.find(data), data, dest, log=quiet)
+    assert r["failed"] == [] and sorted(p.name for p in dest.rglob("*.dat")) == names[:2]
+    unpacking = [c for c in asked if "-C" in c or any(str(a).startswith("-o") for a in c)]
+    assert unpacking and all(str(systemp) in " ".join(map(str, c)) for c in unpacking)      # not inside the project
+    assert list(systemp.iterdir()) == []                                                        # and nothing left behind
+    assert not [d for d in dest.rglob("*") if d.is_dir() and d.name.startswith((".u", "bw-"))]
+    left = dest / ".uabc123" / deep                                                  # what a failed earlier version left
+    left.mkdir(parents=True)
+    (left / names[0]).write_bytes(files[names[0]])
+    (data / "month.rar").write_bytes((data / "month.rar").read_bytes())             # the archive is touched: opened again
+    unpack.unpack(unpack.find(data), data, dest, log=quiet)
+    assert not (dest / ".uabc123").exists()
+
+
+def test_windows_paths_are_given_in_their_long_form(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert unpack._long("/projects/x").startswith("\\\\?\\")
+    assert unpack._long("\\\\?\\C:\\already") == "\\\\?\\C:\\already"
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert unpack._long("/projects/x") == "/projects/x"
 
 
 def test_an_archive_that_changes_or_goes_takes_its_unpacked_files_with_it(mast, tmp_path):

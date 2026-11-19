@@ -340,7 +340,9 @@ def air_density(ds: Dataset, qc: dict, sensors: list[Sensor]) -> dict:
         note += f"; pressure from {p_s.label}"
     elif p_s is not None:
         note += (f"; pressure from {p_s.label} where valid ({measured:.0f}% of records), otherwise "
-                 f"the standard atmosphere at the site elevation ({p0:.0f} hPa)")
+                 + (f"the standard atmosphere at the site elevation ({p0:.0f} hPa)" if p0 is not None else
+                    "none: the site elevation is not known, so the density is the mean of the records with a valid "
+                    "pressure only. Enter the elevation to fill the rest from the standard atmosphere"))
     else:
         note += (f"; no pressure sensor with valid data, so pressure is the standard atmosphere at the "
                  f"site elevation ({p0:.0f} hPa)")

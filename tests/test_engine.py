@@ -366,3 +366,20 @@ def test_flag_periods_order_is_deterministic():
     qc = {"flags": {name: flags(run_) for name in ("WS 80 m W (Ch1)", "T 9 m W (Ch16)", "RH 9 m W (Ch17)")}}
     got = flag_periods(qc)
     assert list(got["sensor"]) == ["RH 9 m W (Ch17)", "T 9 m W (Ch16)", "WS 80 m W (Ch1)"]  # ties: by sensor name
+
+
+def test_air_density_with_a_barometer_that_failed_part_of_the_time_and_no_elevation():
+    """Seen on a real mast: the barometer worked part of the time and the logger gave no elevation. The note about
+    where the rest of the pressure comes from tried to print an elevation's pressure that did not exist."""
+    from types import SimpleNamespace as NS
+    from bohemian_wind.analysis import air_density
+    idx = pd.date_range("2025-01-01", periods=1000, freq="10min")
+    data = pd.DataFrame({"T_avg": 20.0, "P_avg": 900.0}, index=idx)
+    valid = {"T": pd.Series(True, index=idx), "P": pd.Series(np.arange(1000) < 400, index=idx)}
+    sensors = [NS(kind="temperature", label="T", avg_col="T_avg", height=10.0, units="C"),
+               NS(kind="pressure", label="P", avg_col="P_avg", height=8.0, units="hPa")]
+    d = air_density(NS(data=data, site={}), {"valid": valid}, sensors)
+    assert "40% of records" in d["note"] and "the site elevation is not known" in d["note"]
+    assert d["mean"] == pytest.approx(90000.0 / (287.05 * 293.15), rel=1e-6) and d["estimated"]
+    d = air_density(NS(data=data, site={"Elevation": "1000"}), {"valid": valid}, sensors)
+    assert "standard atmosphere at the site elevation (899 hPa)" in d["note"]
