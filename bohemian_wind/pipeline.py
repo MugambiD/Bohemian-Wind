@@ -28,6 +28,12 @@ def safe_name(s: str) -> str:
     return re.sub(r"\s+", "_", s)[:60] or "site"
 
 
+def new_run_folder(output_root, name: str) -> Path:
+    """runs/<name>_<date-time>, made here. Two runs started within the same second get folders of their own."""
+    from .folders import fresh_folder  # noqa: PLC0415
+    return fresh_folder(Path(output_root) / "runs", f"{safe_name(name)}_{datetime.now():%Y%m%d-%H%M%S}", sep="-")
+
+
 def default_output(input_dir) -> Path:
     return Path(input_dir).parent / "Bohemian Wind QC outputs"
 
@@ -86,8 +92,7 @@ def run(input_dir, output_root=None, sympro_path=None, password: str = "", conve
     if not input_dir.is_dir():
         raise PipelineError(f"Folder not found: {input_dir}")
     output_root = Path(output_root) if output_root else default_output(input_dir)
-    run_dir = output_root / "runs" / f"{safe_name(input_dir.name)}_{datetime.now():%Y%m%d-%H%M%S}"
-    run_dir.mkdir(parents=True, exist_ok=True)
+    run_dir = new_run_folder(output_root, input_dir.name)
     log_path = run_dir / "run.log"
 
     def say(msg: str):

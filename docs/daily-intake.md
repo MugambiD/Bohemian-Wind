@@ -34,4 +34,4 @@ Continuous watching from a terminal: `python main.py watch "<project folder>" --
 
 ## Later steps
 
-A new data run marks the later steps *out of date*; it does not re-run them. Re-run them when you want the new data carried through: `python main.py run "<project folder>" longterm map layout environment pack`.
+A new data run marks the later steps *out of date*; it does not re-run them. Re-run them when you want the new data carried through: `python main.py run "<project folder>" longterm map layout environment pack`. In the application, the button of any later step runs the out-of-date steps before it first.

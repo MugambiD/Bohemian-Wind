@@ -22,6 +22,7 @@ from ..terrain import Grid
 ALPHA_500HZ = 1.9            # dB/km
 RECEIVER_HEIGHT = 4.0        # m above ground (ISO 9613-2 practice for dwellings)
 PROFILE_POINTS = 40
+UNCERTAINTY_DB = 2.0         # allowance added to every level for the second verdict ("over with allowance")
 
 
 def level(lw: float, d, dp, hs, hr, hm, alpha: float = ALPHA_500HZ):
@@ -33,6 +34,22 @@ def level(lw: float, d, dp, hs, hr, hm, alpha: float = ALPHA_500HZ):
     a_gr = np.maximum(4.8 - (2.0 * np.asarray(hm, dtype=float) / d) * (17.0 + 300.0 / d), 0.0)
     d_omega = 10.0 * np.log10(1.0 + (dp ** 2 + (hs - hr) ** 2) / (dp ** 2 + (hs + hr) ** 2))
     return lw + d_omega - a_div - a_atm - a_gr
+
+
+def reach_m(lw: float, limit: float, n_turbines: int, alpha: float = ALPHA_500HZ) -> float:
+    """The distance from the nearest turbine beyond which n_turbines together stay under limit, whatever the terrain:
+    every turbine is taken to stand at that same distance, with the whole ground reflection (D_omega at its largest,
+    3 dB) and no ground attenuation. A home farther away than this from every turbine cannot be over the limit by
+    the method of this module."""
+    top = lw + 10.0 * np.log10(2.0) + 10.0 * np.log10(max(int(n_turbines), 1)) - 11.0 - limit
+    lo, hi = 1.0, 1.0e6
+    for _ in range(60):                                   # 20 log10(d) + alpha d / 1000 grows with d: halve the bracket
+        mid = float(np.sqrt(lo * hi))
+        if 20.0 * np.log10(mid) + alpha * mid / 1000.0 < top:
+            lo = mid
+        else:
+            hi = mid
+    return hi
 
 
 def add_levels(levels, axis=0):
@@ -51,7 +68,8 @@ def _mean_path_height(grid: Grid, xs, ys, zs_abs, xr, yr, zr_abs):
 
 
 def at_receptors(grid: Grid, turbines: list, receptors: list, hub_m: float, lw: float, limit: float = 45.0,
-                 uncertainty_db: float = 2.0, alpha: float = ALPHA_500HZ, receiver_height: float = RECEIVER_HEIGHT) -> dict:
+                 uncertainty_db: float = UNCERTAINTY_DB, alpha: float = ALPHA_500HZ,
+                 receiver_height: float = RECEIVER_HEIGHT) -> dict:
     """turbines, receptors: dicts with x, y (local metres) and id / name. Returns a row per receptor and totals.
     Receptors are worked through in blocks, so that tens of thousands of homes take seconds, not minutes."""
     rows = []

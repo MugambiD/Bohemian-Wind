@@ -4,7 +4,7 @@ The aim is software a project developer can use without a wind analyst beside th
 
 ## One step per screen
 
-Six steps, always in the same order, always in the rail on the left. Each screen has two sides: what the step needs from you, and what it found. One button runs the step. A step that an earlier step has overtaken is marked *out of date*, never silently reused.
+Six steps, always in the same order, always in the rail on the left. Each screen has two sides: what the step needs from you, and what it found. One button runs the step. A result that an earlier step has overtaken, or whose own settings have changed since it ran, is marked *out of date* with the reason, and is never silently reused: the button runs the out-of-date steps before it first.
 
 ## Rules
 

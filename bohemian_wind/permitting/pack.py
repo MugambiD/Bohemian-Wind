@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .. import ORG, __version__
+from ..folders import fresh_folder
 from ..terrain import utm
 
 NAVY, TEAL, TINT = "#222952", "#008781", "#E6F3F2"
@@ -84,11 +85,16 @@ def build(project, log=print) -> dict:
     project folder)."""
     lay = project.result("layout")
     env = project.result("environment") if project.status("environment") == "done" else None
+    env_old = project.stale_reason("environment")      # a screening that is out of date stays out of the pack, and the pack says so
+    if env_old:
+        log(f"The noise and shadow flicker screening is out of date and is left out of the pack. {env_old}")
     data, lt, wmap = project.result("data") or {}, project.result("longterm"), project.result("map") or {}
     name = project.s["name"]
     site = project.site()
     stamp = f"{datetime.now():%Y-%m-%d}"
-    out_dir = project.path("permitting", f"pack_{stamp}", "x").parent
+    # a folder of its own: a second pack on the same day used to be written into the first, where the maps and tables
+    # of a screening that is no longer part of the pack stayed behind as if they were
+    out_dir = fresh_folder(project.path("permitting", "x").parent, f"pack_{stamp}")
     t = lay["turbine"]
     files = []
     origin = lay.get("receptor_origin") or {}                      # where the homes came from (project.receptors)
@@ -134,7 +140,9 @@ def build(project, log=print) -> dict:
                              ((env or {}).get("noise_map_print"), "map_noise.png", "Noise screening map"),
                              ((env or {}).get("flicker_map_print"), "map_shadow_flicker.png", "Shadow flicker screening map"),
                              ((env or {}).get("noise_csv"), "noise_at_homes.csv", "Noise level at each home against the limit"),
-                             ((env or {}).get("flicker_csv"), "shadow_flicker_at_homes.csv", "Worst-case shadow flicker at each home")):
+                             ((env or {}).get("flicker_csv"), "shadow_flicker_at_homes.csv", "Worst-case shadow flicker at each home"),
+                             (((env or {}).get("not_assessed") or {}).get("csv"), "homes_not_assessed.csv",
+                              "Homes outside the terrain of the wind map: not assessed for noise or shadow flicker")):
         if rel and (project.folder / rel).is_file():
             shutil.copyfile(project.folder / rel, put(fname, what))
     if LOGO.is_file():
@@ -204,6 +212,19 @@ Method: {_e(nz['method'])}.</p>""")
             if gaps:
                 sec.append("<div class='flag'><b>Where the building sources disagree</b><ul>"
                            + "".join(f"<li>{_e(g)}</li>" for g in gaps) + "</ul></div>")
+        na = env.get("not_assessed")
+        if na:                                  # homes the screening could not reach are said, never dropped without a word
+            near = int(na.get("within_reach") or 0)
+            sec.append(f"<p>Not assessed: {na['n']:,} of the {na['of']:,} homes lie outside the terrain of the wind map, the "
+                       f"nearest {na['nearest_turbine_m'] / 1000:.1f} km from a turbine. "
+                       + (f"{near:,} of them {'is' if near == 1 else 'are'} near enough for noise over the level used or for "
+                          "shadow flicker. " if near else
+                          f"All of them are more than {env['reach_m'] / 1000:.1f} km from every turbine, beyond the reach of "
+                          "noise over the level used and of shadow flicker by the methods used here. ")
+                       + "They are listed in homes_not_assessed.csv.</p>")
+        if env.get("cautions"):
+            sec.append("<div class='flag'><b>The screening is incomplete</b><ul>"
+                       + "".join(f"<li>{_e(c)}</li>" for c in env["cautions"]) + "</ul></div>")
         if (out_dir / "map_noise.png").is_file():
             sec.append("<img class='map' src='map_noise.png' alt='Noise map'>")
         sec.append(_table(["Home", "Level, dB(A)", "With allowance", "Nearest turbine", "Distance, m", "Against the level used"],
@@ -230,7 +251,9 @@ sun, nothing in between). Real flicker is a fraction of this. Stopping turbines 
                        "shadow_flicker_at_homes.csv.</p>")
         n += 1
     else:
-        sec.append(f"<h2>{n}. Noise and shadow flicker</h2><p>Not included: run step 5 with a file of homes, then build the pack again.</p>")
+        sec.append(f"<h2>{n}. Noise and shadow flicker</h2><p>Not included: "
+                   + (f"the screening of step 5 is out of date. {_e(env_old)} Run step 5 again, then build the pack again."
+                      if env_old else "run step 5 with the homes round the site, then build the pack again.") + "</p>")
         n += 1
     credits = list(dict.fromkeys((wmap.get("credits") or []) + ([lt["credit"]] if lt and lt.get("credit") else [])))
     if origin.get("fetched") and bld:
@@ -252,4 +275,5 @@ sun, nothing in between). Real flicker is a fraction of this. Stopping turbines 
     index = out_dir / "index.html"
     index.write_text(page, encoding="utf-8")
     log(f"Permitting pack: {len(files) + 1} files in {project.rel(out_dir)}.")
-    return {"folder": project.rel(out_dir), "index": project.rel(index), "files": files, "with_environment": bool(env)}
+    return {"folder": project.rel(out_dir), "index": project.rel(index), "files": files, "with_environment": bool(env),
+            "environment_out_of_date": bool(env_old)}

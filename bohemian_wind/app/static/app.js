@@ -28,7 +28,7 @@
       empty: ['No layout yet', 'Add your exclusion zones and homes if you have them, choose a turbine size and a number, then place the turbines.'] },
     environment: { n: 5, title: 'Noise and shadow flicker', verb: 'Check noise and shadow flicker', short: 'Screening at homes', photo: 'land.jpg',
       why: 'Screens every home for turbine noise and for worst-case shadow flicker, against the limits you set.',
-      empty: ['Not screened yet', 'This step needs a layout and a file of homes.'] },
+      empty: ['Not screened yet', 'This step needs a layout and the homes round the site: get the buildings from open data in step 4, or give a file of your own.'] },
     pack: { n: 6, title: 'Permitting pack', verb: 'Build the permitting pack', short: 'Tables, maps and GIS files', photo: 'mast.jpg',
       why: 'Collects coordinates, maps and tables into one folder to start the conversation with authorities and consultants.',
       empty: ['No pack built yet', 'The pack holds turbine coordinates with tip heights, GIS files, the constraint record, the screening tables and a summary page.'] },
@@ -290,11 +290,13 @@
         return `<div class="field"><span class="lab">${label}</span>${cur ? `<div class="with-btn"><input type="text" value="${esc(cur)}" disabled aria-label="${label}"><button class="btn" type="button" data-act="detach" data-kind="${kind}">Remove</button></div>` : `<div class="with-btn"><input id="at-${kind}" type="text" spellcheck="false" placeholder="GeoJSON, KML, KMZ or CSV" aria-label="${label}"><button class="btn" type="button" data-pick="file" data-for="at-${kind}" data-attach="${kind}" data-title="${esc(label)}">Browse</button></div>`}<small>${help}</small></div>`;
       };
       const B = S.project.buildings, busy = job && job.status === 'running';
-      const reach = num((Number(L.rules.radius_km) || 0) + 2, 0);
+      const half = S.project.buildings_half_km;
+      const reach = ok(half) ? `within ${num(half, Number.isInteger(Number(half)) ? 0 : 1)} km of the mast` : 'round the search area';
       const buildingsRow = `<div class="field"><span class="lab">Buildings from open data</span>${B ? `<div class="with-btn"><input type="text" value="${esc(`${num(B.n, 0)} buildings, ${day(B.fetched)}`)}" disabled aria-label="Buildings from open data"><button class="btn" type="button" data-act="detach" data-kind="buildings">Remove</button></div>` : ''}
         <div class="links" style="margin:8px 0 6px"><button class="btn" type="button" data-run="buildings"${busy ? ' disabled' : ''}>${B ? 'Get them again' : 'Get buildings'}</button></div>
-        <small>Downloads the buildings mapped in OpenStreetMap and those Microsoft detected in satellite and aerial imagery, within ${reach} km of the mast, and merges them. It needs the internet, and a first download can take several minutes. Every building counts as a home.</small></div>`;
-      const lossSum = 100 * (1 - L.losses.reduce((a, x) => a * (1 - x.pct / 100), 1));
+        <small>Downloads the buildings mapped in OpenStreetMap and those Microsoft detected in satellite and aerial imagery, ${reach}, and merges them. It needs the internet, and a first download can take several minutes. Every building counts as a home.</small></div>`;
+      const losses = L.losses || [];
+      const lossSum = 100 * (1 - losses.reduce((a, x) => a * (1 - x.pct / 100), 1));
       return card('Turbines', fSelect('layout', 'turbine', 'Turbine size', opts, { rerender: true, help: 'Generic turbines of each size. No manufacturer data is used.' })
           + (custom ? `<div class="row2">${fNum('layout', 'rated_kw', 'Rated power, kW', { min: 500 })}${fNum('layout', 'rotor_m', 'Rotor diameter, m', { min: 40 })}</div>` : '')
           + `<div class="row2">${fNum('layout', 'hub_m', 'Hub height, m', { min: 40, max: 250 })}${fNum('layout', 'n_turbines', 'Number of turbines', { min: 1, max: 150, step: 1 })}</div>`
@@ -311,7 +313,7 @@
             ${fNum('layout', 'link_m', 'Keep every turbine within, m of another', { placeholder: 'no limit', min: 0, help: 'Keeps the wind farm in one piece for roads and cables.' })}
             ${fSelect('layout', 'wake', 'Wake model', S.app.wake_models.map(w => [w.key, w.name]))}
             <label class="check"><input type="checkbox" data-s="layout" data-k="refine"${L.refine ? ' checked' : ''}><span>Fine-tune positions against wakes (slower)</span></label>
-            <details class="more"><summary>Losses other than wakes: ${num(lossSum, 1)} %</summary>${L.losses.map((x, i) => `<div class="field"><label for="loss${i}">${esc(x.item)}, %</label><input id="loss${i}" type="number" step="any" min="0" max="50" value="${x.pct}" data-loss="${i}"><small>${esc(x.basis)}</small></div>`).join('')}</details>`);
+            <details class="more"><summary>Losses other than wakes: ${num(lossSum, 1)} %</summary>${losses.map((x, i) => `<div class="field"><label for="loss${i}">${esc(x.item)}, %</label><input id="loss${i}" type="number" step="any" min="0" max="99" value="${x.pct}" data-loss="${i}"><small>${esc(x.basis)}</small></div>`).join('')}</details>`);
     },
     environment() {
       return card('Limits to screen against', `<div class="row2">${fNum('environment', 'sound_power_dba', 'Sound power per turbine, dB(A)', { min: 85, max: 120 })}${fNum('environment', 'noise_limit_dba', 'Noise level at homes, dB(A)', { min: 20, max: 80 })}</div>
@@ -340,8 +342,13 @@
   function runCard(key, st) {
     const m = STEP[key], running = job && job.status === 'running';
     const blocked = st.status === 'blocked';
-    const hint = blocked ? `Run first: ${esc(st.needs.join(', ').toLowerCase())}.` : st.result ? `Last run ${esc(when(st.result.at))}.` : '';
-    return `<div class="card"><button class="btn primary wide" type="button" data-run="${key}"${blocked || running ? ' disabled' : ''}>${m.verb}</button>${hint ? `<p class="hint">${hint}</p>` : ''}</div>`;
+    const first = blocked ? [] : (st.redo || []);
+    const ns = first.map(k => STEP[k].n);      // the steps' names hold "and" themselves: several are named by number
+    const hint = blocked ? `Run first: ${esc(st.needs.join(', ').toLowerCase())}.`
+      : first.length === 1 ? `Runs step ${ns[0]} (${esc(STEP[first[0]].title.toLowerCase())}) again first: it is out of date.`
+      : first.length ? `Runs steps ${ns.slice(0, -1).join(', ')} and ${ns[ns.length - 1]} again first: they are out of date.`
+      : st.result ? `Last run ${esc(when(st.result.at))}.` : '';
+    return `<div class="card" id="run-card"><button class="btn primary wide" type="button" data-run="${key}"${first.length ? ` data-first="${first.join(',')}"` : ''}${blocked || running ? ' disabled' : ''}>${m.verb}</button>${hint ? `<p class="hint">${hint}</p>` : ''}</div>`;
   }
 
   function intakeCard() {
@@ -451,7 +458,14 @@
         x.over_limit ? state('over', 'Over') : x.over_limit_with_uncertainty ? state('near', 'Within, over with allowance') : state('ok', 'Within')]);
       const shown = fl.receptors.filter(x => x.hours_per_year > 0).slice(0, 12);
       const fRows = shown.map(x => [esc(x.name), num(x.hours_per_year, 1), num(x.max_minutes_per_day, 0), x.days_with_flicker, esc(x.turbines.join(', ')), x.over_limit ? state('over', 'Over') : state('ok', 'Within')]);
-      return `<div class="tiles">
+      const na = r.not_assessed, cautions = r.cautions || [];
+      const gaps = (cautions.length ? card(`${ICON.warn}The screening is incomplete`, list(cautions), 'warnbox') : '')
+        + (na ? card(`Homes not assessed <small>${num(na.n, 0)} of ${num(na.of, 0)}</small>`,
+          `<p class="note">Outside the terrain of the wind map, the nearest ${num(na.nearest_turbine_m / 1000, 1)} km from a turbine. ${na.within_reach
+            ? `${num(na.within_reach, 0)} of them ${na.within_reach === 1 ? 'is' : 'are'} near enough for noise over the level used or for shadow flicker.`
+            : `All of them are more than ${num(r.reach_m / 1000, 1)} km from every turbine, beyond the reach of noise over the level used and of shadow flicker.`}</p>
+           <div class="links" style="margin-top:12px"><a class="btn" href="${fileUrl(na.csv, st.result.at)}">Download the list</a></div>`) : '');
+      return `${gaps}<div class="tiles">
           ${tile('Homes over the noise level', `${num(nz.over_limit, 0)} <small>of ${num(nz.n_receptors, 0)}</small>`, `${num(nz.over_limit_with_uncertainty, 0)} with a ${num(nz.uncertainty_db, 0)} dB allowance`)}
           ${tile('Highest noise level', `${num(nz.highest_dba, 1)} <small>dB(A)</small>`, `level used: ${num(nz.limit_dba, 0)} dB(A)`)}
           ${tile('Homes over a flicker limit', `${num(fl.over_limit, 0)} <small>of ${num(fl.n_receptors, 0)}</small>`, `${num(fl.with_any_flicker, 0)} could see any flicker`)}
@@ -472,7 +486,7 @@
     },
     pack(r) {
       return `${card('The pack is ready', `<div class="links"><a class="btn primary" href="${fileUrl(r.index)}" target="_blank" rel="noopener">Open the summary page</a><button class="btn" type="button" data-act="reveal" data-path="${esc(r.folder)}">Open the pack folder</button></div>
-          ${r.with_environment ? '' : '<p class="hint">Noise and shadow flicker were left out: step 5 was not done or was out of date.</p>'}`)}
+          ${r.with_environment ? '' : `<p class="hint">Noise and shadow flicker are not in this pack: ${r.environment_out_of_date ? 'step 5 was out of date when it was built. Run step 5 again, then build the pack again.' : 'step 5 was not done.'}</p>`}`)}
         ${card(`Files <small>${r.files.length + 1}</small>`, table(['File', 'What it holds'], [[`<a href="${fileUrl(r.index)}" target="_blank" rel="noopener">index.html</a>`, 'Summary page to print or send']].concat(
           r.files.map(f => [`<a href="${fileUrl(f.file)}" target="_blank" rel="noopener">${esc(f.file.split('/').pop())}</a>`, `<span style="white-space:normal">${esc(f.what)}</span>`]))))}
         ${card('Before it goes out', list(['Turbine positions are indicative. Say so when you share them.', 'The pack supports a permit application; it does not replace the studies a permit needs.', 'Check the buffers and limits against the rules that apply at the site.']))}`;
@@ -500,9 +514,13 @@
     if (running && (pageOf(now) === key && (job.current || job.steps.length === 1))) return workingPanel();
     if (running) h += card('', `<p class="note">Working on another step: ${esc(STEP[now].title.toLowerCase())}.</p>`);
     if (lastError && pageOf(lastError.step) === key) h += errorPanel();
+    else if (lastError && (st.redo || []).includes(lastError.step)) {      // an earlier step, run first for this one, did not finish
+      h += `<section class="card alert"><h2>${ICON.cross}${esc(STEP[lastError.step].title)} did not finish</h2><p class="note">${esc(lastError.message)}</p>
+        <p class="hint">It is run before this step, so this step was not run. <a href="#" data-go="${lastError.step}">Open step ${STEP[lastError.step].n}</a> for the working log.</p></section>`;
+    }
     if (key === 'layout') h += buildingsCard();
     if (st.result) {
-      if (st.status === 'stale') h += card(`${ICON.warn}Out of date`, '<p class="note">An earlier step was run again after this one. Run this step again to bring it in line.</p>', 'warnbox');
+      if (st.status === 'stale') h += card(`${ICON.warn}Out of date`, `<p class="note">${esc(st.why || 'Something this step works from changed after it ran.')} What is shown below is the earlier result. Run this step again to bring it in line.</p>`, 'warnbox');
       h += RESULTS[key](st.result, st);
     } else if (!(lastError && pageOf(lastError.step) === key) && !(key === 'layout' && S.project.buildings)) {
       const m = STEP[key];
@@ -565,6 +583,23 @@
   // ---------- events ----------
   async function act(fn) { try { await fn(); } catch (e) { toast(e.message, true); } }
 
+  // A setting can put this step and the later ones out of date. The fields are left alone, so typing is not
+  // interrupted; the status, the run button and the results are drawn again.
+  function refreshStatus() {
+    renderRail();
+    if (!S.project || !STEP[view] || view === 'buildings') return;
+    const st = stepOf(view), old = main.querySelector('.page > header .pill'), runBox = $('#run-card'), res = $('#results');
+    if (old) old.outerHTML = pill(st);
+    if (runBox) runBox.outerHTML = runCard(view, st);
+    if (res && !(job && job.status === 'running')) res.innerHTML = resultsFor(view, st);
+  }
+
+  async function saveSettings(section, values, redraw) {
+    try { S = await api('/api/settings', { section, values }); }
+    catch (e) { toast(e.message, true); render(true); return; }      // the field shows what is stored again
+    if (redraw) render(true); else refreshStatus();
+  }
+
   document.addEventListener('click', e => {
     const go = e.target.closest('[data-go]');
     if (go) {
@@ -575,7 +610,7 @@
       return;
     }
     const run = e.target.closest('[data-run]');
-    if (run) { runSteps([run.dataset.run]); return; }
+    if (run) { runSteps((run.dataset.first ? run.dataset.first.split(',') : []).concat(run.dataset.run)); return; }
     const pick = e.target.closest('[data-pick]');
     if (pick) {
       act(async () => {
@@ -629,12 +664,12 @@
         const h = row.querySelector('[data-ch="height"]').value, o = row.querySelector('[data-ch="offset"]').value;
         if (port && (h !== '' || o !== '')) channels[port] = { height_m: h === '' ? null : Number(h), direction_offset_deg: o === '' ? null : Number(o) };
       });
-      act(async () => { S = await api('/api/settings', { section: 'data', values: { channels } }); render(true); });
+      saveSettings('data', { channels }, true);
       return;
     }
     if (el.dataset.loss !== undefined) {
-      const losses = S.project.layout.losses.map((x, i) => i === Number(el.dataset.loss) ? { ...x, pct: Math.max(0, Number(el.value) || 0) } : x);
-      act(async () => { S = await api('/api/settings', { section: 'layout', values: { losses } }); render(true); });
+      const losses = (S.project.layout.losses || []).map((x, i) => i === Number(el.dataset.loss) ? { ...x, pct: el.value === '' ? 0 : Number(el.value) } : x);
+      saveSettings('layout', { losses }, true);
       return;
     }
     if (!el.dataset.s) return;
@@ -645,10 +680,7 @@
       const t = S.app.turbines.find(x => x.key === v);
       if (t) Object.assign(values, { rated_kw: t.rated_kw, rotor_m: t.rotor_m, hub_m: t.hub_m });
     }
-    act(async () => {
-      S = await api('/api/settings', { section: el.dataset.s, values });
-      if (el.dataset.rerender) render(true); else { renderRail(); }
-    });
+    saveSettings(el.dataset.s, values, !!el.dataset.rerender);
   });
 
   // tooltips: hover and keyboard focus show the same thing

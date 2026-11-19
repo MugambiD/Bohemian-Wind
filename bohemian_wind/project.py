@@ -10,16 +10,19 @@
     <project>/environment/      step 5: noise and shadow flicker at homes
     <project>/permitting/       step 6: the pack for authorities and consultants
 
-Steps run in order; each uses the latest result of the steps before it. A step whose inputs have been run again
-since is marked out of date.
+Steps run in order; each uses the latest result of the steps before it. A result is out of date when a setting or
+a file it was made from has changed since, when an earlier step was run again since, or when it rests on a result
+that is itself out of date. Nothing new is built on an out-of-date result.
 
 [COMPLIANCE] Results are developer estimates. Nothing here is an accredited or bankable assessment.
 """
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import shutil
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -40,6 +43,90 @@ DEFAULT_ALPHA = 0.14
 MAX_CELLS = 1.6e6        # terrain cells in one wind map (25 km each way in 50 m cells): beyond it the flow model's memory runs to gigabytes
 LISTED_HOMES = 500       # homes kept in the project file per list (noise, flicker), the most affected first; with more
 #                          homes than this the full lists live in the CSV files only, or the project file runs to tens of MB
+
+
+# every earlier step a step rests on, in order: the ones that are out of date are run again before it
+RESTS_ON = {"data": (), "longterm": ("data",), "map": ("data", "longterm"), "layout": ("data", "longterm", "map"),
+            "environment": ("data", "longterm", "map", "layout"),
+            "pack": ("data", "longterm", "map", "layout", "environment")}
+
+
+def _feed_longterm(s: dict) -> dict:
+    cfg = s["longterm"]
+    by_file = cfg.get("source") == "file"          # the files count only when the reference is read from them
+    return {"source": "file" if by_file else "download", "monthly_file": cfg.get("monthly_file") if by_file else None,
+            "daily_file": cfg.get("daily_file") if by_file else None}
+
+
+def _feed_map(s: dict) -> dict:
+    m = dict(s["map"])
+    if m.get("engine") != "atlas":                 # the atlas folder counts only for the atlas engine
+        m.pop("gwa_dir", None)
+    return {**m, "direction_offset_deg": s["data"].get("direction_offset_deg") or 0.0,
+            "shear_alpha": s["data"].get("shear_alpha")}
+
+
+# The settings each step works from. When one of them, or a file it names, changes after the step ran, the result no
+# longer belongs to the settings on the screen and the step is out of date. Settings that reach a step only through
+# an earlier one are left to that one: the position of the mast is in step 1, and everything rests on step 1.
+FEEDS = {
+    "data": lambda s: {"site": s["site"], "folder": s["data"].get("folder"), "channels": s["data"].get("channels") or {}},
+    "longterm": _feed_longterm,
+    "map": _feed_map,
+    "layout": lambda s: dict(s["layout"]),
+    "environment": lambda s: dict(s["environment"]),
+    "pack": lambda s: {"name": s["name"]},
+}
+_FILE_MARKS: dict = {}
+
+
+def _canon(v):
+    """Settings in one form, so that 3, 3.0 and "3", an empty text and nothing, or the order of keys do not read as
+    a change. A setting that is empty or switched off counts the same as one that is not there: a later version
+    that brings a new setting, off by default, does not put the results of this one out of date."""
+    if isinstance(v, bool) or v is None:
+        return v
+    if isinstance(v, dict):
+        items = ((str(k), _canon(x)) for k, x in sorted(v.items(), key=lambda kv: str(kv[0])))
+        return {k: c for k, c in items if c is not None and c is not False and c != {} and c != []}
+    if isinstance(v, (list, tuple)):
+        return [_canon(x) for x in v]
+    if isinstance(v, str) and not v.strip():
+        return None
+    try:
+        f = float(v)
+        return repr(round(f, 9)) if np.isfinite(f) else str(v)
+    except (TypeError, ValueError, OverflowError):
+        return str(v)
+
+
+def _file_mark(path) -> str:
+    """A short mark of a file's content (empty when there is no file). The content is read once per version of the
+    file, told apart by size and time of writing; a file written within the last few seconds is read again each
+    time, because a clock that ticks coarsely can give two versions the same time."""
+    try:
+        st = Path(path).stat()
+    except (OSError, TypeError):
+        return ""
+    key = (str(path), st.st_size, st.st_mtime_ns)
+    just_written = abs(time.time_ns() - st.st_mtime_ns) < 3_000_000_000
+    if just_written or key not in _FILE_MARKS:
+        h = hashlib.sha1()  # noqa: S324 (a change mark, not a secret)
+        try:
+            with open(path, "rb") as fh:
+                for block in iter(lambda: fh.read(1 << 20), b""):
+                    h.update(block)
+        except OSError:
+            return ""
+        if len(_FILE_MARKS) > 500:              # versions of files long gone
+            _FILE_MARKS.clear()
+        _FILE_MARKS[key] = f"{st.st_size}:{h.hexdigest()[:16]}"
+    return _FILE_MARKS[key]
+
+
+def _homes(n: int, one: str = "", many: str = "") -> str:
+    """'1 home' or '2,345 homes', with the verb that goes with it when one is given."""
+    return f"{n:,} {'home' if n == 1 else 'homes'}" + (f" {one if n == 1 else many}" if one else "")
 
 
 class ProjectError(RuntimeError):
@@ -181,6 +268,12 @@ class Project:
             self.s["name"] = str(values.get("name") or self.s["name"]).strip()
         elif section in ("site", "data", "longterm", "map", "layout", "environment"):
             values = dict(values)
+            if section == "layout" and "losses" in values:         # checked when entered, not when the layout runs
+                from .energy import EnergyError, budget  # noqa: PLC0415
+                try:
+                    values["losses"] = budget.losses_table(values["losses"])    # nothing given: the table of defaults
+                except EnergyError as e:
+                    raise ProjectError(str(e)) from e
             channels = values.pop("channels", None) if section == "data" else None
             self.s[section] = _merge(self.s[section], values)
             if section == "layout" and "buildings_file" in values and not values["buildings_file"]:
@@ -228,35 +321,98 @@ class Project:
 
     def _store(self, step: str, summary: dict) -> dict:
         summary = dict(summary)
-        summary["at"] = f"{datetime.now():%Y-%m-%d %H:%M:%S}"
+        summary["at"] = self._stamp(step)
         summary["based_on"] = {n: (self.result(n) or {}).get("at") for n in NEEDS[step]}
         if step in ("map", "layout"):   # both rest on the long-term mean: a new long-term run marks them out of date
             summary["based_on"]["longterm"] = (self.result("longterm") or {}).get("at")
         if step == "layout":            # and the layout on the buildings: fetching or removing them marks it out of date
             summary["based_on"]["buildings"] = (self.result("buildings") or {}).get("at")
+        if step == "pack":              # the screening is in the pack only when it was up to date
+            summary["based_on"]["environment"] = (self.result("environment") or {}).get("at") if self.status("environment") == "done" else None
+        if step in FEEDS:
+            summary["inputs"] = self.inputs(step)
         self.s["results"][step] = summary
         self.save()
         return summary
 
-    def status(self, step: str) -> str:
-        """'done', 'stale' (an earlier step was run again since), 'ready' or 'blocked'."""
+    def _stamp(self, step: str) -> str:
+        """The time of a run, to the second. The steps tell each other's runs apart by it, so a second run of a step
+        within the same second waits for the next one."""
+        before = (self.result(step) or {}).get("at")
+        while True:
+            at = f"{datetime.now():%Y-%m-%d %H:%M:%S}"
+            if at != before:
+                return at
+            time.sleep(0.05)
+
+    def inputs(self, step: str) -> str:
+        """A mark of the settings a step works from and of the files they name (see FEEDS)."""
+        feed = FEEDS[step](self.s)
+        files = {k: _file_mark(self.resolve(v)) for k, v in feed.items() if k.endswith("_file") and v}
+        text = json.dumps([_canon(feed), files], sort_keys=True)
+        return hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]  # noqa: S324 (a change mark, not a secret)
+
+    def stale_reason(self, step: str, memo: dict | None = None) -> str | None:
+        """Why a result is out of date, in a sentence; None when it is up to date or there is none. memo: answers
+        already worked out in the same pass (the state of all six steps asks about each step many times over)."""
+        if memo is not None and step in memo:
+            return memo[step]
+        why = self._stale_reason(step, memo)
+        if memo is not None:
+            memo[step] = why
+        return why
+
+    def _stale_reason(self, step: str, memo: dict | None) -> str | None:
         r = self.result(step)
-        if r:
-            based = dict(r.get("based_on") or {})
-            if step == "layout":
-                based.setdefault("buildings", None)     # a layout from before any buildings were fetched
-            for n, at in based.items():
-                if (self.result(n) or {}).get("at") != at:
-                    return "stale"
-            return "done"
-        return "ready" if all(self.result(n) for n in NEEDS[step]) else "blocked"
+        if not r:
+            return None
+        if step in FEEDS and r.get("inputs") not in (None, self.inputs(step)):      # results from before this mark was kept carry none
+            return "A setting or a file it works from was changed after it ran."
+        based = dict(r.get("based_on") or {})
+        if step == "layout":
+            based.setdefault("buildings", None)     # a layout from before any buildings were fetched
+        if step == "pack" and "environment" in based:
+            now = (self.result("environment") or {}).get("at") if self.status("environment", memo) == "done" else None
+            if based.pop("environment") != now:
+                return "The noise and shadow flicker screening changed after the pack was built."
+        for n, at in based.items():
+            if (self.result(n) or {}).get("at") != at:
+                return ("The buildings from open data were fetched or removed after it ran." if n == "buildings"
+                        else f"'{STEP_NAMES[n]}' was run again after it.")
+            if n in STEPS and self.stale_reason(n, memo):
+                return f"It rests on '{STEP_NAMES[n]}', which is out of date."
+        return None
+
+    def status(self, step: str, memo: dict | None = None) -> str:
+        """'done', 'stale' (out of date: see stale_reason), 'ready' or 'blocked'."""
+        if self.result(step):
+            return "stale" if self.stale_reason(step, memo) else "done"
+        return "ready" if all(self.result(n) for n in NEEDS.get(step, ())) else "blocked"
+
+    def redo(self, step: str, memo: dict | None = None) -> list:
+        """The earlier steps that are out of date, in order: they are run again before this one."""
+        return [n for n in RESTS_ON.get(step, ()) if self.result(n) and self.status(n, memo) == "stale"]
+
+    def _guard(self, step: str) -> None:
+        """Nothing new is built on an out-of-date result."""
+        for n in NEEDS.get(step, ()):
+            why = self.stale_reason(n)
+            if why:
+                raise ProjectError(f"'{STEP_NAMES[n]}' (step {STEPS.index(n) + 1}) is out of date. {why} "
+                                   "Run it again, then this step.")
 
     def state(self) -> dict:
         out = {k: v for k, v in self.s.items() if k != "results"}
         out["folder"] = str(self.folder)
-        out["steps"] = [{"key": k, "name": STEP_NAMES[k], "status": self.status(k), "result": self.result(k),
-                         "needs": [STEP_NAMES[n] for n in NEEDS[k] if not self.result(n)]} for k in STEPS]
+        memo: dict = {}
+        out["steps"] = [{"key": k, "name": STEP_NAMES[k], "status": self.status(k, memo), "result": self.result(k),
+                         "needs": [STEP_NAMES[n] for n in NEEDS[k] if not self.result(n)],
+                         "why": self.stale_reason(k, memo), "redo": self.redo(k, memo)} for k in STEPS]
         out["buildings"] = self.result("buildings")
+        try:
+            out["buildings_half_km"] = self.buildings_half_km()       # how far out "Get buildings" would fetch now
+        except ProjectError:
+            out["buildings_half_km"] = None
         return out
 
     # ---------- shared pieces ----------
@@ -275,17 +431,18 @@ class Project:
         elev = s.get("elevation_m") if s.get("elevation_m") is not None else c.get("elevation_m")
         if need_position and (lat is None or lon is None):
             raise ProjectError("The mast position is not known: the logger files give none. Enter the latitude and "
-                               "longitude under 'Mast data', then run this step again.")
+                               "longitude under 'Mast data', check the data again (step 1), then run this step.")
         return {"lat": lat, "lon": lon, "elevation_m": elev}
 
     def speed_scale(self, clim: dict | None = None) -> dict:
         """What the wind climate's speeds are multiplied by, and why (see climate.speed_scale). A long-term
-        correction made before the mast data were last checked is not used: its mean belongs to other data."""
+        correction that is out of date is not used: its mean belongs to other data or to another reference."""
         clim = clim or self.climate()
         r = self.result("longterm")
-        if r and self.status("longterm") == "stale":
-            raise ProjectError("The mast data were checked again after the long-term correction was made. Run step 2 "
-                               "(long-term correction) again, then this step, so both rest on the same data.")
+        why = self.stale_reason("longterm")
+        if why:
+            raise ProjectError(f"The long-term correction is out of date. {why} Run step 2 (long-term correction) "
+                               "again, then this step, so both rest on the same data.")
         return _climate.speed_scale(clim, r)
 
     def vane_offset(self) -> tuple:
@@ -352,10 +509,11 @@ class Project:
         except constraints.ConstraintError as e:
             raise ProjectError(str(e)) from e
 
-    def receptors(self, grid) -> tuple:
+    def receptors(self, grid, outside: list | None = None) -> tuple:
         """The homes the siting rules, the noise and the flicker work with: the buildings fetched from open data, if
-        any, with the user's own file on top (environment.buildings.combine). Returns (rows on the terrain, counts
-        by origin)."""
+        any, with the user's own file on top (environment.buildings.combine). Returns (rows inside the grid given,
+        counts by origin). Homes beyond the grid are counted, and added to outside when a list is given: step 4
+        gives the grid of the wind map, step 5 the wider terrain round it."""
         from .environment import buildings  # noqa: PLC0415
         own = self.features("receptors")
         rel = self.s["layout"].get("buildings_file")
@@ -370,9 +528,58 @@ class Project:
             except buildings.BuildingsError as e:
                 raise ProjectError(str(e)) from e
         rows, counts = buildings.combine(fetched, own, grid.to_xy)
-        rows = [r for r in rows if grid.inside(r["x"], r["y"])]
-        counts["on_the_terrain"] = len(rows)
-        return rows, counts
+        inside = [r for r in rows if grid.inside(r["x"], r["y"])]
+        counts["inside"], counts["outside"] = len(inside), len(rows) - len(inside)
+        if outside is not None and len(inside) < len(rows):
+            keep = {id(r) for r in inside}
+            outside.extend(r for r in rows if id(r) not in keep)
+        return inside, counts
+
+    @staticmethod
+    def reach_m(lw: float, limit: float, n_turbines: int, rotor_m: float) -> float:
+        """How far from its nearest turbine a home can be and still be over the noise level used (allowance
+        included) or see shadow flicker, by the methods of step 5. Beyond it neither can happen."""
+        from .environment import flicker, noise  # noqa: PLC0415
+        return max(noise.reach_m(lw, limit - noise.UNCERTAINTY_DB, n_turbines), flicker.MAX_DISTANCE_ROTORS * rotor_m)
+
+    def buildings_half_km(self) -> float:
+        """How far from the mast the buildings are fetched (half the side of the square): the search radius of step 4,
+        or the farthest turbine of a layout that was given, plus a margin wide enough for the setback rule and for
+        the homes the noise or the flicker of step 5 can reach, by the settings as they are."""
+        from .environment import buildings  # noqa: PLC0415
+        L, E = self.s["layout"], self.s["environment"]
+        R = L.get("rules") or {}
+        radius = _num(R.get("radius_km"), "Search radius", 1, 30)
+        mapped = _num(self.s["map"].get("half_km"), "Area half-width", 2, 30, True)
+        if mapped:                              # as in step 4: turbines are sought no farther out than the wind map
+            radius = min(radius, mapped)
+        margin, far = buildings.MARGIN_KM, 0.0
+        try:
+            given = [f.coords[0] for f in self.features("positions") if f.kind == "point"]
+            if given:                           # turbine positions of the user's own may lie beyond the search radius
+                site = self.site()
+                m_lon, m_lat = self._metres(site["lat"])
+                far = max(max(abs((lon - site["lon"]) * m_lon), abs((lat - site["lat"]) * m_lat)) for lat, lon in given) / 1000.0
+            n = len(given) or int(_num(L.get("n_turbines"), "Number of turbines", 1, 150))
+            reach = self.reach_m(_num(E.get("sound_power_dba"), "Sound power level", 85, 120),
+                                 _num(E.get("noise_limit_dba"), "Noise limit", 20, 80), n, self.turbine().rotor_m)
+            setback = _num(R.get("receptor_setback_m"), "Setback from homes", 0, 5000)
+            margin = max(margin, float(np.ceil(max(reach, setback) / 100.0)) / 10.0 + 0.2)
+        except ProjectError:
+            pass                                # settings still to be filled in: the usual margin
+        return float(min(max(radius, far) + margin, buildings.MAX_HALF_KM))
+
+    def buildings_edge_m(self, grid, x, y) -> float | None:
+        """The shortest distance from the points x, y (local metres) to the edge of the square the buildings were
+        fetched for; negative when a point lies outside it. None when the project uses no fetched buildings."""
+        bld = self.result("buildings")
+        if not bld or not self.s["layout"].get("buildings_file"):
+            return None
+        c = bld.get("centre")
+        cx, cy = grid.to_xy(c["lat"], c["lon"]) if c else (0.0, 0.0)
+        h = float(bld["half_km"]) * 1000.0
+        x, y = np.atleast_1d(np.asarray(x, dtype=float)), np.atleast_1d(np.asarray(y, dtype=float))
+        return float(np.min(h - np.maximum(np.abs(x - cx), np.abs(y - cy))))
 
     def wind_field(self, height_m: float, log=lambda m: None):
         """Wind field at height_m: the stored one if it matches, else computed from the stored terrain."""
@@ -409,6 +616,7 @@ class Project:
 
     def run_data(self, log=print) -> dict:
         from . import intake  # noqa: PLC0415
+        self._guard("data")
         folder = self.s["data"].get("folder")
         if not folder:
             raise ProjectError("Choose the folder that holds the mast's logger files.")
@@ -452,6 +660,7 @@ class Project:
 
     def run_longterm(self, log=print) -> dict:
         from . import longterm  # noqa: PLC0415
+        self._guard("longterm")
         clim = self.climate()
         cfg = self.s["longterm"]
         if cfg.get("source") == "file":
@@ -499,6 +708,7 @@ class Project:
     def run_map(self, log=print) -> dict:
         from . import maps, terrain  # noqa: PLC0415
         from .flow import fields  # noqa: PLC0415
+        self._guard("map")
         m = self.s["map"]
         height = _num(m.get("height_m"), "Map height", 10, 300)
         half = _num(m.get("half_km"), "Area half-width", 2, 30)
@@ -568,6 +778,7 @@ class Project:
         from .energy import EnergyError, assess  # noqa: PLC0415
         from .energy.turbine import air_density  # noqa: PLC0415
         from .environment import constraints  # noqa: PLC0415
+        self._guard("layout")
         L = self.s["layout"]
         turbine = self.turbine()
         n = int(_num(L.get("n_turbines"), "Number of turbines", 1, 150))
@@ -585,13 +796,18 @@ class Project:
             line_buffer_m=_num(R.get("line_buffer_m"), "Buffer along roads and lines", 0, 5000),
             receptor_setback_m=_num(R.get("receptor_setback_m"), "Setback from homes", 0, 5000))
         exclusions, boundary = self.features("exclusions"), self.features("boundary")
-        receptors, origin = self.receptors(grid)
+        outside: list = []
+        receptors, origin = self.receptors(grid, outside)
         if origin["fetched"] or origin["taken_out"] or origin["replaced"]:
             log(f"Homes: {origin['fetched']:,} buildings from open data and {origin['yours']:,} of your own file"
                 + (f"; your file took {origin['taken_out']:,} buildings out" if origin["taken_out"] else "")
                 + (f" and stands for {origin['replaced']:,} more" if origin["replaced"] else "") + ".")
-        mask, rep = constraints.buildable(grid, rules, exclusions=exclusions, receptors=receptors, boundary=boundary,
-                                          mean_ws=wf.mean_ws)
+        if outside:
+            log(f"{_homes(len(receptors), 'is', 'are')} on the wind map and {len(outside):,} beyond its edge.")
+        sb = rules.receptor_setback_m           # a home just beyond the wind map still keeps turbines away from its edge
+        at_edge = [r for r in outside if grid.x[0] - sb <= r["x"] <= grid.x[-1] + sb and grid.y[0] - sb <= r["y"] <= grid.y[-1] + sb]
+        mask, rep = constraints.buildable(grid, rules, exclusions=exclusions, receptors=receptors + at_edge,
+                                          boundary=boundary, mean_ws=wf.mean_ws)
         log(f"Buildable area: {rep['buildable_km2']:.1f} km2 after {len(rep['steps']) - 1} rules.")
         elev = site.get("elevation_m") if site.get("elevation_m") is not None else float(grid.sample(0.0, 0.0))
         d = clim.get("density") or {}
@@ -617,13 +833,20 @@ class Project:
                                 along_d=_num(L.get("along_d"), "Spacing along the wind", 1.5, 20),
                                 link_m=_num(L.get("link_m"), "Link distance", 0, 20000, True) or None,
                                 wake=L.get("wake") or "niayifar", refine=bool(L.get("refine")), refine_seconds=45.0,
-                                losses=L.get("losses") or None, log=log)
+                                losses=L.get("losses"), log=log)
         except EnergyError as e:
             raise ProjectError(str(e)) from e
         res["notes"] = res["notes"] + [n[0].upper() + n[1:] + "." for n in (f_note, a_note, self.vane_offset()[1]) if n] + (
             [scale["lean"]] if scale["lean"] else []) + [f"Air density at hub height {rho:.3f} kg/m3 ({rho_src})."]
         res["annual_mean_ws"], res["annual_mean_height_m"], res["climate_scale"] = scale["mean_ws"], clim["height_m"], scale["scale"]
         res["warnings"] = self.warnings(clim) + list(wf.cautions) + list(res.pop("cautions", []))
+        need = rules.radius_km + sb / 1000.0    # the setback rule looks this far from the mast
+        edge = self.buildings_edge_m(grid, [-need * 1000.0, need * 1000.0], [-need * 1000.0, need * 1000.0])
+        if edge is not None and edge < -1.0:
+            res["warnings"].append(
+                f"The buildings from open data were fetched for {float(self.result('buildings')['half_km']):g} km round the mast, "
+                f"and the siting rules now reach {need:.1f} km: homes beyond the fetched area are missing from the setback "
+                "rule. Get the buildings again, then place the turbines again.")
         res["given_layout"] = bool(given)
         if given:
             names = [g["name"] for g in given]
@@ -680,6 +903,7 @@ class Project:
     def run_environment(self, log=print) -> dict:
         from . import maps  # noqa: PLC0415
         from .environment import flicker, noise  # noqa: PLC0415
+        self._guard("environment")
         lay = self.result("layout")
         if not lay:
             raise ProjectError("Place the turbines first (step 4).")
@@ -691,9 +915,13 @@ class Project:
         year = int(_num(E.get("year"), "Year", 1950, 2099))
         t = lay["turbine"]
         hub, rotor = float(t["hub_m"]), float(t["rotor_m"])
-        wf = self.wind_field(hub, log)
-        grid = wf.grid
-        receptors, _ = self.receptors(grid)
+        grid = self.grid()                      # the whole terrain: it reaches a quarter farther out than the wind map,
+        outside: list = []                      # and noise and flicker need its heights only, so homes out there count too
+        receptors, _ = self.receptors(grid, outside)
+        if not receptors and outside:
+            raise ProjectError(f"{'The only home lies' if len(outside) == 1 else f'All {len(outside):,} homes lie'} outside "
+                               "the terrain of the wind map, so there is nothing to assess. Draw the wind map over a wider "
+                               "area (step 3) and place the turbines again, or check the positions in the homes file.")
         if not receptors:
             raise ProjectError("There are no homes in the project yet. Under 'Layout and energy', get the buildings from "
                                "open data, or choose a file with one "
@@ -732,6 +960,43 @@ class Project:
                 w.writerow([r["name"], r["lat"], r["lon"], r["hours_per_year"], r["max_minutes_per_day"], r["days_with_flicker"],
                             "yes" if r["over_limit"] else "no", " ".join(r["turbines"]), r["nearest_turbine_m"]])
         out["noise_csv"], out["flicker_csv"] = "environment/noise_at_homes.csv", "environment/flicker_at_homes.csv"
+        tx, ty = np.array([q["x"] for q in turbines], dtype=float), np.array([q["y"] for q in turbines], dtype=float)
+        reach = self.reach_m(lw, limit, len(turbines), rotor)
+        out["reach_m"] = round(reach, 0)
+        cautions = []
+        if outside:                             # supplied, but beyond the terrain: said, listed and weighed
+            for r in outside:
+                r["nearest_turbine_m"] = float(np.hypot(tx - r["x"], ty - r["y"]).min())
+            outside.sort(key=lambda r: r["nearest_turbine_m"])
+            with open(self.path("environment", "homes_not_assessed.csv"), "w", newline="", encoding="utf-8") as fh:
+                w = csv.writer(fh)
+                w.writerow(["home", "latitude", "longitude", "nearest_turbine_m", "within_reach_of_noise_or_flicker", "why_not_assessed"])
+                for r in outside:
+                    w.writerow([r["name"], r["lat"], r["lon"], f"{r['nearest_turbine_m']:.0f}",
+                                "yes" if r["nearest_turbine_m"] <= reach else "no", "outside the terrain of the wind map"])
+            near, nearest = sum(r["nearest_turbine_m"] <= reach for r in outside), outside[0]["nearest_turbine_m"]
+            out["not_assessed"] = {"n": len(outside), "of": len(outside) + len(receptors), "nearest_turbine_m": round(nearest, 0),
+                                   "within_reach": near, "csv": "environment/homes_not_assessed.csv"}
+            log(f"  {len(outside):,} of the {len(outside) + len(receptors):,} homes lie outside the terrain of the wind map and "
+                f"were not assessed; the nearest is {nearest / 1000:.1f} km from a turbine.")
+            if near:
+                cautions.append(
+                    f"{_homes(near, 'was', 'were')} not assessed, though within {reach / 1000:.1f} km of a turbine and so near "
+                    "enough for noise over the level used or for shadow flicker: the terrain of the wind map ends before "
+                    f"{'it' if near == 1 else 'them'}. Draw the wind map over a wider area (step 3), then run steps 4 and 5 again.")
+        else:                                   # the list of an earlier run no longer holds
+            (self.folder / "environment" / "homes_not_assessed.csv").unlink(missing_ok=True)
+        edge = self.buildings_edge_m(grid, tx, ty)
+        if edge is not None and edge < reach:   # the fetched buildings stop short of where the turbines can be heard or seen
+            cautions.append(
+                f"The buildings from open data were fetched for {float(self.result('buildings')['half_km']):g} km round the mast. "
+                + (f"A turbine stands {edge / 1000:.1f} km from the edge of that area" if edge >= 0 else "A turbine stands outside that area")
+                + f", and noise over the level used or shadow flicker can reach {reach / 1000:.1f} km from a turbine: homes "
+                "beyond the edge are not in the data. Get the buildings again (the area follows the settings as they are "
+                "now), then run steps 4 and 5 again.")
+        out["cautions"] = cautions
+        for c in cautions:
+            log(f"  Caution: {c}")
         if len(receptors) > LISTED_HOMES:       # a survey of thousands of buildings: the project keeps the most affected
             nz["receptors"], fl["receptors"] = nz["receptors"][:LISTED_HOMES], fl["receptors"][:LISTED_HOMES]
             nz["receptors_listed"] = fl["receptors_listed"] = LISTED_HOMES
@@ -744,6 +1009,7 @@ class Project:
 
     def run_pack(self, log=print) -> dict:
         from .permitting import pack  # noqa: PLC0415
+        self._guard("pack")
         if not self.result("layout"):
             raise ProjectError("Place the turbines first (step 4): the pack is built round the layout.")
         out = pack.build(self, log=log)
@@ -755,15 +1021,15 @@ class Project:
         from . import maps  # noqa: PLC0415
         from .environment import buildings  # noqa: PLC0415
         site = self.site()
-        R = self.s["layout"].get("rules") or {}
-        half = _num(R.get("radius_km"), "Search radius", 1, 30) + buildings.MARGIN_KM
+        m_lon, m_lat = self._metres(site["lat"])
+        half = self.buildings_half_km()
         try:
             out = buildings.fetch(site["lat"], site["lon"], half, self.path("constraints", buildings.FILE).parent, log=log)
             rows = buildings.load(self.path("constraints", buildings.FILE))
         except buildings.BuildingsError as e:
             raise ProjectError(str(e)) from e
         out["file"] = f"constraints/{buildings.FILE}"
-        m_lon, m_lat = self._metres(site["lat"])
+        out["centre"] = {"lat": site["lat"], "lon": site["lon"]}
         for r in rows:
             r["x"], r["y"] = (r["lon"] - site["lon"]) * m_lon, (r["lat"] - site["lat"]) * m_lat
         sub = (f"{self.s['name']}: {out['n_osm']:,} in OpenStreetMap, {out['n_added_from_microsoft']:,} more in Microsoft's "

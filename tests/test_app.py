@@ -132,13 +132,15 @@ def test_a_new_data_run_marks_later_steps_out_of_date(project, tmp_path):
     p = Project.open(copy)
     p.run("data", log=quiet)
     assert p.status("data") == "done" and p.status("longterm") == "stale" and p.status("map") == "stale"
-    assert p.status("layout") == "done"          # still based on the same map run; the map itself is what is stale
+    assert p.status("layout") == "stale" and p.status("environment") == "stale"     # they rest on a map that is out of date
+    with pytest.raises(ProjectError, match=r"'Wind map' \(step 3\) is out of date. 'Mast data' was run again"):   # nothing new is built on it
+        p.run("layout", log=quiet)
     with pytest.raises(ProjectError, match="Run step 2"):          # the old long-term mean belongs to the old data
         p.run("map", log=quiet)
     p.run("longterm", log=quiet)
     assert p.status("layout") == "stale"         # the layout rests on the long-term mean too
     p.run("map", log=quiet)
-    assert p.status("map") == "done" and p.status("layout") == "stale" and p.status("pack") == "done"
+    assert p.status("map") == "done" and p.status("layout") == "stale" and p.status("pack") == "stale"
     state = p.state()
     assert [s["key"] for s in state["steps"]] == list(STEPS) and "results" not in state
 
@@ -313,6 +315,14 @@ def test_application_interface_and_its_locks(project, tmp_path, monkeypatch):
         code, body, _ = _call(url + "api/settings", token=app.token, body={"section": "layout", "values": {"n_turbines": 6}})
         assert code == 200 and json.loads(body)["project"]["layout"]["n_turbines"] == 6
         assert _call(url + "api/settings", token=app.token, body={"section": "nonsense", "values": {}})[0] == 400
+        code, body, _ = _call(url + "api/settings", token=app.token,
+                              body={"section": "layout", "values": {"losses": [{"item": "Availability", "pct": 150}]}})
+        assert code == 400 and "The loss for 'Availability' is 150 %" in json.loads(body)["error"]      # refused, with the reason
+        st = json.loads(_call(url + "api/state", token=app.token)[1])["project"]
+        assert len(st["layout"]["losses"]) == 7 and st["buildings_half_km"] == 9.0
+        lay = next(s for s in st["steps"] if s["key"] == "layout")                 # the changed number put the layout out of date
+        assert lay["status"] == "stale" and lay["why"].startswith("A setting or a file") and lay["redo"] == []
+        assert next(s for s in st["steps"] if s["key"] == "pack")["redo"] == ["layout", "environment"]
         code, body, _ = _call(url + "api/run", token=app.token, body={"steps": ["layout", "pack"]})
         job = json.loads(body)
         assert code == 200 and job["status"] == "running"
@@ -328,7 +338,9 @@ def test_application_interface_and_its_locks(project, tmp_path, monkeypatch):
         lay = next(s for s in st["project"]["steps"] if s["key"] == "layout")
         assert lay["result"]["n_placed"] == 6 and lay["status"] == "done"
         env = next(s for s in st["project"]["steps"] if s["key"] == "environment")
-        assert env["status"] == "stale"                                           # the layout changed under it
+        assert env["status"] == "stale" and env["why"] == "'Layout and energy' was run again after it."      # the layout changed under it
+        pack = next(s for s in st["project"]["steps"] if s["key"] == "pack")       # built without the screening, and knows it
+        assert pack["status"] == "done" and pack["redo"] == ["environment"] and pack["result"]["environment_out_of_date"]
         assert json.loads(_call(url + "api/project", token=app.token, body={"action": "close"})[1])["project"] is None
     finally:
         server.shutdown()
@@ -432,6 +444,7 @@ def test_air_density_of_a_mast_without_thermometer_comes_from_the_reference(tmp_
         del j["properties"]["parameter"][name]
     ref.write_text(json.dumps(j), encoding="utf-8")
     assert p.run("longterm", log=quiet)["reference_air"] is None
+    p.run("map", log=quiet)                                                        # the map rests on the long-term run too
     again = p.run("layout", log=quiet)
     assert again["rho_hub"] == pytest.approx(isa) and "too dense for a warm climate" in " ".join(again["notes"])
     assert again["gross_gwh"] > lay["gross_gwh"]                                   # denser air, more energy

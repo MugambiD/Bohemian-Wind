@@ -59,7 +59,7 @@ from .. import DISCLAIMER
 from .. import __version__ as QC_VERSION
 from .. import report as rp
 from ..analysis import analyse, rose, sector, ti_bins, weibull_fit
-from ..pipeline import safe_name, write_inventory
+from ..pipeline import new_run_folder, safe_name, write_inventory
 from ..points import Sensor
 from ..qc import FLAG_ORDER, _runs, flag_periods, flag_summary, recovery_by_month, run_qc
 from ..sympro import Dataset, distance_m, merge_duplicates
@@ -741,7 +741,7 @@ def main(argv=None, log=None):
     folders = [Path(f) for f in a.folders]
     converted = out_root / "converted" / safe_name(raw.name)
     name = a.name or settings.get("site_name") or raw.name
-    run_dir = out_root / "runs" / f"{safe_name(name)}_{datetime.now():%Y%m%d-%H%M%S}"
+    run_dir = new_run_folder(out_root, name)
     (run_dir / "figures").mkdir(parents=True, exist_ok=True)
     log_path = run_dir / "run.log"
 

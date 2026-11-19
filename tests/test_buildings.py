@@ -419,7 +419,7 @@ def test_the_project_fetches_the_buildings_and_every_later_step_uses_them(tmp_pa
     before = p.result("layout")["receptors_in_area"]
     own_points = sum(f.kind == "point" for f in p.features("receptors"))
     assert p.result("layout")["receptor_origin"] == {"yours": own_points, "fetched": 0, "taken_out": 0, "replaced": 0, "marks": 0,
-                                                     "on_the_terrain": before}
+                                                     "inside": before, "outside": 0}
     west, east = cluster(-3000.0, -3000.0, 6, 5), cluster(3000.0, 2500.0, 5, 5)
     half = p.s["layout"]["rules"]["radius_km"] + bld.MARGIN_KM
     net = site_net(west, [(x + 5.0, y) for x, y in west] + east, site["lat"], site["lon"], half_km=half)
@@ -437,7 +437,7 @@ def test_the_project_fetches_the_buildings_and_every_later_step_uses_them(tmp_pa
     lay = p.run("layout", log=lines.append)
     o = lay["receptor_origin"]
     assert o["yours"] == own_points and o["fetched"] + o["replaced"] == 55 and o["taken_out"] == 0
-    assert lay["receptors_in_area"] == o["on_the_terrain"] > before and p.status("layout") == "done"
+    assert lay["receptors_in_area"] == o["inside"] > before and o["outside"] == 0 and p.status("layout") == "done"
     assert any(ln.startswith("Homes: ") and "buildings from open data" in ln for ln in lines)
     assert any("homes and other receptors" in s["rule"] and f"({lay['receptors_in_area']})" in s["rule"] for s in lay["constraints"]["steps"])
     # a file of the user's own on top: an outline named "not a home" round the eastern group takes it out
@@ -449,7 +449,8 @@ def test_the_project_fetches_the_buildings_and_every_later_step_uses_them(tmp_pa
         encoding="utf-8")
     p.attach("receptors", mine)
     lay = p.run("layout", log=quiet)
-    assert lay["receptor_origin"] == {"yours": 1, "fetched": 30, "taken_out": 25, "replaced": 0, "marks": 1, "on_the_terrain": 31}
+    assert lay["receptor_origin"] == {"yours": 1, "fetched": 30, "taken_out": 25, "replaced": 0, "marks": 1, "inside": 31,
+                                      "outside": 0}
     env = p.run("environment", log=quiet)
     assert env["noise"]["n_receptors"] == 31
     pack = p.run("pack", log=quiet)

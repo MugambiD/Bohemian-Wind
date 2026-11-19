@@ -8,6 +8,8 @@ from __future__ import annotations
 import math
 from dataclasses import asdict, dataclass
 
+from . import EnergyError
+
 Z75, Z90 = 0.6745, 1.2816
 
 
@@ -46,11 +48,27 @@ DEFAULT_IAV_SPEED = 6.0      # inter-annual variability of the annual mean wind 
 
 
 def losses_from(items) -> list:
-    """Losses from dicts (as edited in the app) or Loss objects."""
+    """Losses from dicts (as edited in the app) or Loss objects. None stands for the defaults; an empty list is a
+    budget with no losses, as it says. A loss that is not a number from 0 up to, but not including, 100 is refused:
+    a negative loss would add energy, and 100 % or more would leave none."""
+    if items is None:
+        return list(DEFAULT_LOSSES)
+    if not isinstance(items, (list, tuple)):
+        raise EnergyError("The losses must be given as a table: one row per loss, each with a name and a percentage.")
     out = []
-    for it in items or DEFAULT_LOSSES:
-        out.append(it if isinstance(it, Loss) else Loss(str(it.get("group", "")), str(it["item"]), float(it["pct"]),
-                                                        str(it.get("basis", ""))))
+    for it in items:
+        if not isinstance(it, Loss):
+            try:
+                name = str(it["item"])
+            except (KeyError, TypeError, IndexError):
+                raise EnergyError("A loss in the table has no name. Each row needs a name and a percentage.") from None
+            try:
+                it = Loss(str(it.get("group", "")), name, float(it["pct"]), str(it.get("basis", "")))
+            except (KeyError, TypeError, ValueError):
+                raise EnergyError(f"The loss for '{name}' is not a number. Give a figure from 0 to less than 100.") from None
+        if not (math.isfinite(it.pct) and 0.0 <= it.pct < 100.0):
+            raise EnergyError(f"The loss for '{it.item}' is {it.pct:g} %. Give a figure from 0 to less than 100.")
+        out.append(it)
     return out
 
 
