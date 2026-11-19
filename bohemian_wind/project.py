@@ -799,9 +799,10 @@ class Project:
         outside: list = []
         receptors, origin = self.receptors(grid, outside)
         if origin["fetched"] or origin["taken_out"] or origin["replaced"]:
+            did = ([f"its points stand for {origin['replaced']:,} fetched buildings"] if origin["replaced"] else []) + (
+                [f"it took {origin['taken_out']:,} buildings out"] if origin["taken_out"] else [])
             log(f"Homes: {origin['fetched']:,} buildings from open data and {origin['yours']:,} of your own file"
-                + (f"; your file took {origin['taken_out']:,} buildings out" if origin["taken_out"] else "")
-                + (f" and stands for {origin['replaced']:,} more" if origin["replaced"] else "") + ".")
+                + ("; " + " and ".join(did) if did else "") + ".")
         if outside:
             log(f"{_homes(len(receptors), 'is', 'are')} on the wind map and {len(outside):,} beyond its edge.")
         sb = rules.receptor_setback_m           # a home just beyond the wind map still keeps turbines away from its edge

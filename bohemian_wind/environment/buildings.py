@@ -46,9 +46,13 @@ class BuildingsError(RuntimeError):
     """A problem the user can act on; the message says how."""
 
 
-# public Overpass servers, tried in turn: each is busy at times and answers with an error or not at all
-OVERPASS_URLS = ("https://overpass-api.de/api/interpreter", "https://overpass.private.coffee/api/interpreter",
-                 "https://overpass.kumi.systems/api/interpreter")
+# public Overpass servers, tried in turn: each is busy at times and answers with an error or not at all. Three
+# machines in three hands (overpass.kumi.systems is the same machine as overpass.private.coffee, so it is not listed).
+OVERPASS_URLS = ("https://overpass-api.de/api/interpreter", "https://overpass.openstreetmap.fr/api/interpreter",
+                 "https://overpass.private.coffee/api/interpreter")
+OSM_TIMEOUT_S = 75.0         # a busy server takes half a minute over one part; one silent for this long is passed over
+OSM_WAITS_S = (5.0, 15.0, 30.0)     # every server busy: wait this long and go round again, as the servers ask
+OSM_BUSY = (429, 502, 503, 504)     # "no room now": worth another go, unlike a question the server refuses
 # Microsoft moves the list of its files with every release and announces the address in the repository's README
 MS_README = "https://raw.githubusercontent.com/microsoft/GlobalMLBuildingFootprints/main/README.md"
 MS_MANIFESTS = ("https://bfppub.blob.core.windows.net/%24web/2026-11-12/dataset-links.csv",
@@ -108,6 +112,22 @@ def _open(url: str, *, data: bytes | None = None, headers: dict | None = None, t
     """The one place that touches the network (the tests replace it)."""
     req = urllib.request.Request(url, data=data, headers={"User-Agent": f"bohemian-wind/{__version__}", **(headers or {})})
     return urllib.request.urlopen(req, timeout=timeout)  # noqa: S310 (fixed https hosts)
+
+
+def _sleep(seconds: float) -> None:
+    """Every wait goes through here (the tests replace it)."""
+    time.sleep(seconds)
+
+
+def _busy(e) -> bool:
+    """Worth another go later: the server has no room, did not answer in time, or gave an answer cut short. A
+    question the server refuses outright (400, 403, 404, 406) will be refused again."""
+    return e.code in OSM_BUSY if isinstance(e, urllib.error.HTTPError) else True
+
+
+def _silent(e) -> bool:
+    """No answer within the time allowed."""
+    return isinstance(e, TimeoutError) or "timed out" in str(getattr(e, "reason", e)).lower()
 
 
 def _short(e) -> str:
@@ -349,11 +369,12 @@ def osm_parts(south: float, west: float, north: float, east: float) -> list:
             for j in range(ny) for i in range(nx)]
 
 
-def fetch_osm(south: float, west: float, north: float, east: float, *, log=print, timeout: float = 150.0, copy=None,
-              today: date | None = None) -> tuple:
+def fetch_osm(south: float, west: float, north: float, east: float, *, log=print, timeout: float = OSM_TIMEOUT_S,
+              copy=None, today: date | None = None) -> tuple:
     """([(lat, lon, id)], server). The area is asked for in parts and each public server is tried in turn, the one
-    that answered last first. With copy (a file path) the parts that arrived are kept for the day, so a second go
-    asks only for what is missing."""
+    that answered last first. When every server is busy the round is tried again after a wait, three times; a server
+    that stays silent twice is left out for the rest of the go. With copy (a file path) the parts that arrived are
+    kept for the day, so a second go asks only for what is missing."""
     today = today or date.today()
     box = [round(v, 6) for v in (south, west, north, east)]
     state = {"box": box, "fetched": today.isoformat(), "server": "", "parts": {}}
@@ -366,9 +387,11 @@ def fetch_osm(south: float, west: float, north: float, east: float, *, log=print
             pass
 
     def save():
-        if copy is not None:
-            Path(copy).parent.mkdir(parents=True, exist_ok=True)
-            Path(copy).write_text(json.dumps(state), encoding="utf-8")
+        if copy is not None:             # written beside the copy and moved over it: a go that is stopped half way
+            Path(copy).parent.mkdir(parents=True, exist_ok=True)      # through the writing leaves the earlier copy whole
+            tmp = Path(str(copy) + ".part")
+            tmp.write_text(json.dumps(state), encoding="utf-8")
+            tmp.replace(copy)
 
     parts = osm_parts(south, west, north, east)
     todo = [(k, b) for k, b in parts if k not in state["parts"]]
@@ -379,33 +402,49 @@ def fetch_osm(south: float, west: float, north: float, east: float, *, log=print
     else:
         log(f"  OpenStreetMap buildings, in {len(parts)} parts ..." if len(parts) > 1 else "  OpenStreetMap buildings ...")
     servers = sorted(OVERPASS_URLS, key=lambda u: urllib.parse.urlsplit(u).netloc != state["server"])
+    silences: dict = {}
     for n, (key, b) in enumerate(todo):
         data = urllib.parse.urlencode({"data": overpass_query(*b)}).encode()
-        failure = None
-        for url in list(servers):
-            host = urllib.parse.urlsplit(url).netloc
-            try:
-                with _open(url, data=data, timeout=timeout) as r:
-                    obj = json.loads(r.read())
-                if not isinstance(obj, dict) or "elements" not in obj:
-                    raise ValueError("no buildings list in the answer")
-                if "error" in str(obj.get("remark") or "").lower():      # a query cut short answers with what it had
-                    raise ValueError(str(obj["remark"]))
-            except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError) as e:
-                failure = e
-                log(f"    no usable answer from {host} ({_short(e)})")
-                servers.remove(url)
-                servers.append(url)              # a server that failed goes to the back of the queue
-                continue
-            state["parts"][key], state["server"] = parse_overpass(obj), host
-            save()
-            break
-        else:
+        failure, got = None, False
+        for wait in (0.0,) + tuple(OSM_WAITS_S):
+            if wait:
+                log(f"    every server is busy: trying again in {wait:g} s")
+                _sleep(wait)
+            worth_waiting = False
+            for url in list(servers):
+                host = urllib.parse.urlsplit(url).netloc
+                try:
+                    with _open(url, data=data, timeout=timeout) as r:
+                        obj = json.loads(r.read())
+                    if not isinstance(obj, dict) or "elements" not in obj:
+                        raise ValueError("no buildings list in the answer")
+                    if "error" in str(obj.get("remark") or "").lower():      # a query cut short answers with what it had
+                        raise ValueError(str(obj["remark"]))
+                except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError) as e:
+                    failure = e
+                    worth_waiting = worth_waiting or _busy(e)
+                    log(f"    no usable answer from {host} ({_short(e)})")
+                    servers.remove(url)
+                    silences[host] = silences.get(host, 0) + (1 if _silent(e) else 0)
+                    if silences[host] < 2 or not servers:
+                        servers.append(url)          # a server that failed goes to the back of the queue
+                    else:
+                        log(f"    {host} stays silent: left out for the rest of this go")
+                    continue
+                state["parts"][key], state["server"] = parse_overpass(obj), host
+                save()
+                got = True
+                if len(parts) > 1:
+                    log(f"    part {len(parts) - len(todo) + n + 1} of {len(parts)}: {len(state['parts'][key]):,} buildings")
+                break
+            if got or not worth_waiting:
+                break
+        if not got:
             done = len(parts) - len(todo) + n
             raise BuildingsError(f"OpenStreetMap could not be reached ({_short(failure)})."
                                  + (f" {done} of {len(parts)} parts arrived and are kept for today." if done and copy is not None else ""))
         if n + 1 < len(todo) and OSM_PAUSE_S:
-            time.sleep(OSM_PAUSE_S)
+            _sleep(OSM_PAUSE_S)
     seen, rows = set(), []
     for key, _ in parts:                         # a building on the edge of two parts comes with both: once is enough
         for lat, lon, ident in state["parts"][key]:

@@ -30,7 +30,11 @@ quiet = lambda m: None  # noqa: E731
 
 @pytest.fixture(autouse=True)
 def no_waiting(monkeypatch):
+    """No test waits: the pauses the module asks for are recorded instead."""
+    waits = []
     monkeypatch.setattr(bld, "OSM_PAUSE_S", 0)
+    monkeypatch.setattr(bld, "_sleep", waits.append)
+    return waits
 
 
 def ll(x, y, lat0=LAT0, lon0=LON0):
@@ -288,6 +292,66 @@ def test_openstreetmap_is_asked_in_parts_and_what_arrived_is_kept(tmp_path, monk
     lines = []
     rows, _ = bld.fetch_osm(*box, log=lines.append, copy=copy, today=tomorrow)
     assert len(net2.calls) - n == 2 and len(rows) == 5 and any("2 of 4 parts arrived earlier today" in ln for ln in lines)
+
+
+def test_busy_servers_are_given_time_and_silent_or_unwilling_ones_are_not(tmp_path, monkeypatch, no_waiting):
+    m_lon, m_lat = metres_per_degree(LAT0)
+    box = (LAT0 - 4000 / m_lat, LON0 - 4000 / m_lon, LAT0 + 4000 / m_lat, LON0 + 4000 / m_lon)       # four parts
+    pts = [(-2000.0, -2000.0), (2000.0, -2000.0), (-2000.0, 2000.0), (2000.0, 2000.0)]
+    first, second, third = bld.OVERPASS_URLS
+    hosts = [urllib.parse.urlsplit(u).netloc for u in bld.OVERPASS_URLS]
+    assert len(set(hosts)) == 3 and not any("kumi" in h for h in hosts)       # three machines, not one machine under two names
+    # every server at capacity for two rounds, then one of them finds room: the go waits as the servers ask, and gets through
+    answers, asked = overpass_server(pts), {"n": 0}
+
+    def room_on_the_third_round(url, data):
+        asked["n"] += 1
+        if asked["n"] <= 2:
+            raise urllib.error.HTTPError(url, 502, "Bad Gateway", {}, None)
+        return answers(url, data)
+
+    net = Net()
+    monkeypatch.setattr(bld, "_open", net)
+    net.pages[first] = urllib.error.HTTPError(first, 502, "Bad Gateway", {}, None)
+    net.pages[second] = room_on_the_third_round
+    net.pages[third] = urllib.error.HTTPError(third, 429, "Too Many Requests", {}, None)
+    copy = tmp_path / "constraints" / bld.OSM_COPY
+    lines = []
+    rows, server = bld.fetch_osm(*box, log=lines.append, copy=copy, today=TODAY)
+    assert len(rows) == 4 and server == hosts[1] and no_waiting == [5.0, 15.0]
+    assert sum("every server is busy: trying again in" in ln for ln in lines) == 2
+    assert [ln.strip() for ln in lines if "part " in ln and " of 4" in ln] == [f"part {i} of 4: 1 buildings" for i in (1, 2, 3, 4)]
+    assert json.loads(copy.read_text("utf-8"))["server"] == hosts[1] and not list(copy.parent.glob("*.part"))    # the copy is whole
+    # a question every server refuses is not asked again and again
+    no_waiting.clear()
+    net = Net()
+    monkeypatch.setattr(bld, "_open", net)
+    for u in bld.OVERPASS_URLS:
+        net.pages[u] = urllib.error.HTTPError(u, 400, "Bad Request", {}, None)
+    with pytest.raises(bld.BuildingsError, match="OpenStreetMap could not be reached .HTTP Error 400"):
+        bld.fetch_osm(*box, log=quiet)
+    assert no_waiting == [] and len(net.calls) == 3
+    # a server that says nothing twice is left out; the others carry on, and all four rounds are tried before giving up
+    net = Net()
+    monkeypatch.setattr(bld, "_open", net)
+    net.pages[first] = TimeoutError("The read operation timed out")
+    net.pages[second] = urllib.error.HTTPError(second, 503, "Service Unavailable", {}, None)
+    net.pages[third] = urllib.error.URLError(TimeoutError("timed out"))
+    lines = []
+    with pytest.raises(bld.BuildingsError, match="OpenStreetMap could not be reached"):
+        bld.fetch_osm(*box, log=lines.append)
+    assert no_waiting == [5.0, 15.0, 30.0]
+    assert (net.asked(hosts[0]), net.asked(hosts[1]), net.asked(hosts[2])) == (2, 4, 2)
+    assert sum("stays silent: left out for the rest of this go" in ln for ln in lines) == 2
+    # a copy cut off in the writing by an earlier go is not in the way
+    no_waiting.clear()
+    (copy.parent / (copy.name + ".part")).write_text('{"box": [', encoding="utf-8")
+    net = Net()
+    monkeypatch.setattr(bld, "_open", net)
+    net.pages[first] = answers
+    n = len(net.calls)
+    rows, _ = bld.fetch_osm(*box, log=quiet, copy=copy, today=TODAY)
+    assert len(rows) == 4 and len(net.calls) == n                                  # all four parts were kept: nothing is asked
 
 
 def test_the_two_sources_are_merged_and_their_gaps_are_named(tmp_path, monkeypatch):
