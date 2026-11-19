@@ -34,6 +34,9 @@
       empty: ['No pack built yet', 'The pack holds turbine coordinates with tip heights, GIS files, the constraint record, the screening tables and a summary page.'] },
   };
   const ORDER = ['data', 'longterm', 'map', 'layout', 'environment', 'pack'];
+  // fetching the buildings for step 4 runs like a step and shows on that step's page, but is not one of the six
+  STEP.buildings = { n: 4, title: 'Buildings from open data', verb: 'Get buildings', short: '', photo: 'hero.jpg', why: '', empty: ['', ''] };
+  const pageOf = k => k === 'buildings' ? 'layout' : k;
 
   const ICON = {
     check: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><path d="M5 8.2l2 2 4-4.2"/></svg>',
@@ -286,13 +289,19 @@
         const cur = L[kind + '_file'];
         return `<div class="field"><span class="lab">${label}</span>${cur ? `<div class="with-btn"><input type="text" value="${esc(cur)}" disabled aria-label="${label}"><button class="btn" type="button" data-act="detach" data-kind="${kind}">Remove</button></div>` : `<div class="with-btn"><input id="at-${kind}" type="text" spellcheck="false" placeholder="GeoJSON, KML, KMZ or CSV" aria-label="${label}"><button class="btn" type="button" data-pick="file" data-for="at-${kind}" data-attach="${kind}" data-title="${esc(label)}">Browse</button></div>`}<small>${help}</small></div>`;
       };
+      const B = S.project.buildings, busy = job && job.status === 'running';
+      const reach = num((Number(L.rules.radius_km) || 0) + 2, 0);
+      const buildingsRow = `<div class="field"><span class="lab">Buildings from open data</span>${B ? `<div class="with-btn"><input type="text" value="${esc(`${num(B.n, 0)} buildings, ${day(B.fetched)}`)}" disabled aria-label="Buildings from open data"><button class="btn" type="button" data-act="detach" data-kind="buildings">Remove</button></div>` : ''}
+        <div class="links" style="margin:8px 0 6px"><button class="btn" type="button" data-run="buildings"${busy ? ' disabled' : ''}>${B ? 'Get them again' : 'Get buildings'}</button></div>
+        <small>Downloads the buildings mapped in OpenStreetMap and those Microsoft detected in satellite and aerial imagery, within ${reach} km of the mast, and merges them. It needs the internet, and a first download can take several minutes. Every building counts as a home.</small></div>`;
       const lossSum = 100 * (1 - L.losses.reduce((a, x) => a * (1 - x.pct / 100), 1));
       return card('Turbines', fSelect('layout', 'turbine', 'Turbine size', opts, { rerender: true, help: 'Generic turbines of each size. No manufacturer data is used.' })
           + (custom ? `<div class="row2">${fNum('layout', 'rated_kw', 'Rated power, kW', { min: 500 })}${fNum('layout', 'rotor_m', 'Rotor diameter, m', { min: 40 })}</div>` : '')
           + `<div class="row2">${fNum('layout', 'hub_m', 'Hub height, m', { min: 40, max: 250 })}${fNum('layout', 'n_turbines', 'Number of turbines', { min: 1, max: 150, step: 1 })}</div>`
           + fileRow('positions', 'Turbine positions of your own', L.positions_file ? 'The layout is taken as given: the number of turbines, the spacing and the fine-tuning are not used. Remove the file to have a layout designed.' : 'Optional. One point per turbine, to work out the energy of a layout you already have.'))
         + card('Your constraints', fileRow('exclusions', 'Exclusion zones, roads and lines', 'Polygons are kept clear; lines get a buffer each side.')
-          + fileRow('receptors', 'Homes and other receptors', 'One point per home. Also used for noise and shadow flicker.')
+          + buildingsRow
+          + fileRow('receptors', B ? 'Homes of your own, on top' : 'Homes and other receptors', B ? 'One point per home, for example placemarks from Google Earth. Each counts, and stands for a fetched building within 30 m. A point or an outline named "not a home" takes fetched buildings out.' : 'One point per home. Also used for noise and shadow flicker.')
           + fileRow('boundary', 'Site boundary', 'Turbines stay inside it.')
           + `<details class="more" open><summary>Buffers and limits</summary>
              <div class="row2">${fNum('layout', 'rules.receptor_setback_m', 'Setback from homes, m', { min: 0 })}${fNum('layout', 'rules.exclusion_buffer_m', 'Buffer round zones, m', { min: 0 })}</div>
@@ -470,16 +479,32 @@
     },
   };
 
+  function buildingsCard() {
+    const b = S.project.buildings;
+    if (!b) return '';
+    const src = b.sources, row = (name, s, n) => [name, s.ok ? num(s.n, 0) : 'not reached', s.ok ? num(n, 0) : '–'];
+    const rows = [row('OpenStreetMap', src.osm, b.n_osm), row("Microsoft's footprints", src.microsoft, b.n_added_from_microsoft)];
+    return card(`Buildings from open data <small>${num(b.n, 0)} within ${num(b.half_km, 0)} km</small>`,
+      table(['Source', 'Buildings it holds', 'Taken into the project'], rows, [1, 2])
+      + `<p class="hint">Every OpenStreetMap building is kept. A Microsoft footprint is added when OpenStreetMap has no building within 30 m of it. Fetched ${esc(day(b.fetched))}.</p>`
+      + (b.map ? `<a href="${fileUrl(b.map, b.at)}" target="_blank" rel="noopener"><img class="map" style="margin-top:12px" src="${fileUrl(b.map, b.at)}" alt="Map of the buildings by source: OpenStreetMap, Microsoft's footprints only, and your own file"></a>` : '')
+      + `<p class="hint">Neither source is a survey: they list buildings of every kind, and the footprints are machine detections. Check against imagery or on site, and put what is missing in a file of your own.</p>`
+      + `<p class="hint">${(b.attribution || []).map(esc).join(' ')}</p>`)
+      + ((b.warnings || []).length ? card(`${ICON.warn}Where the sources disagree`, list(b.warnings), 'warnbox') : '');
+  }
+
   function resultsFor(key, st) {
     const running = job && job.status === 'running';
+    const now = running ? (job.current || job.steps[0]) : null;
     let h = '';
-    if (running && (job.current === key || (job.steps.includes(key) && !job.done.includes(key) && job.steps.length === 1))) return workingPanel();
-    if (running) h += card('', `<p class="note">Working on another step: ${esc(STEP[job.current || job.steps[0]].title.toLowerCase())}.</p>`);
-    if (lastError && lastError.step === key) h += errorPanel();
+    if (running && (pageOf(now) === key && (job.current || job.steps.length === 1))) return workingPanel();
+    if (running) h += card('', `<p class="note">Working on another step: ${esc(STEP[now].title.toLowerCase())}.</p>`);
+    if (lastError && pageOf(lastError.step) === key) h += errorPanel();
+    if (key === 'layout') h += buildingsCard();
     if (st.result) {
       if (st.status === 'stale') h += card(`${ICON.warn}Out of date`, '<p class="note">An earlier step was run again after this one. Run this step again to bring it in line.</p>', 'warnbox');
       h += RESULTS[key](st.result, st);
-    } else if (!(lastError && lastError.step === key)) {
+    } else if (!(lastError && pageOf(lastError.step) === key) && !(key === 'layout' && S.project.buildings)) {
       const m = STEP[key];
       h += `<div class="empty"><img src="/static/img/${m.photo}" alt=""><div><h2>${m.empty[0]}</h2><p>${m.empty[1]}</p></div></div>`;
     }

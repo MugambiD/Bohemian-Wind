@@ -38,6 +38,9 @@ Credit these wherever a result that uses them is published.
 
 - **NASA POWER** (long-term reference): "These data were obtained from the NASA Langley Research Center (LaRC) POWER Project funded through the NASA Earth Science/Applied Science Program." Wind speed at 50 m from MERRA-2.
 - **SRTM terrain**, via Terrain Tiles on AWS (Mapzen/Tilezen): SRTM data courtesy of the U.S. Geological Survey.
+- **OpenStreetMap buildings**, through the public Overpass API servers: © OpenStreetMap contributors, Open Database License 1.0 (https://www.openstreetmap.org/copyright). The licence asks for this credit wherever the data are shown, and for the same licence on a database made from them that is passed on.
+- **Microsoft Global ML Building Footprints** (https://github.com/microsoft/GlobalMLBuildingFootprints): licensed by Microsoft under the Community Data License Agreement – Permissive 2.0 (https://cdla.dev/permissive-2-0/). Anyone who passes the data on makes the text of that agreement available with them.
+  The application prints both notices in the project and in the permitting pack whenever buildings from these sources are used. No building data are shipped with the program.
 - **Global Wind Atlas** (optional map method): "Data obtained from the Global Wind Atlas 4.0, a free, web-based application developed, owned and operated by the Technical University of Denmark (DTU). The Global Wind Atlas 4.0 is released in partnership with the World Bank Group, utilizing data provided by Vortex, using funding provided by the Energy Sector Management Assistance Program (ESMAP)." Licence CC BY 4.0. The program scales the atlas to the mast: say that the data were changed.
 
 ## Methods

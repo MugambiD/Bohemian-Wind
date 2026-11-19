@@ -64,6 +64,8 @@ def defaults() -> dict:
         "layout": {"turbine": "4.5 MW, 163 m rotor", "rated_kw": 4500.0, "rotor_m": 163.0, "hub_m": 120.0,
                    "n_turbines": 10, "cross_d": 3.0, "along_d": 7.0, "link_m": 2500.0, "wake": "niayifar", "refine": True,
                    "exclusions_file": "", "receptors_file": "", "boundary_file": "",
+                   # buildings fetched from open data (environment.buildings): the homes file above goes on top of them
+                   "buildings_file": "",
                    # turbine positions of the user's own (one point per turbine): the layout is taken as given
                    "positions_file": "",
                    "rules": {"radius_km": 8.0, "slope_max_pct": 15.0, "exclusion_buffer_m": 100.0, "line_buffer_m": 250.0,
@@ -181,6 +183,8 @@ class Project:
             values = dict(values)
             channels = values.pop("channels", None) if section == "data" else None
             self.s[section] = _merge(self.s[section], values)
+            if section == "layout" and "buildings_file" in values and not values["buildings_file"]:
+                self.s["results"].pop("buildings", None)       # the fetched buildings were removed: so is their summary
             if channels is not None:            # replaced as a whole, so a sensor can be taken out again
                 self.s["data"]["channels"] = _channels(channels)
         else:
@@ -200,8 +204,11 @@ class Project:
             feats = constraints.read_features(src)
         except constraints.ConstraintError as e:
             raise ProjectError(str(e)) from e
-        if kind == "receptors" and not any(f.kind == "point" for f in feats):
-            raise ProjectError("The homes file holds no points. Give a GeoJSON, KML or CSV file with one point per home.")
+        if kind == "receptors":
+            from .environment.buildings import NOT_A_HOME  # noqa: PLC0415
+            if not any(f.kind == "point" or NOT_A_HOME.match(f.name or "") for f in feats):
+                raise ProjectError("The homes file holds no points. Give a GeoJSON, KML or CSV file with one point per "
+                                   "home, or outlines named 'not a home' to take fetched buildings out.")
         if kind == "positions" and not any(f.kind == "point" for f in feats):
             raise ProjectError("The turbine positions file holds no points. Give a GeoJSON, KML or CSV file with one "
                                "point per turbine.")
@@ -225,6 +232,8 @@ class Project:
         summary["based_on"] = {n: (self.result(n) or {}).get("at") for n in NEEDS[step]}
         if step in ("map", "layout"):   # both rest on the long-term mean: a new long-term run marks them out of date
             summary["based_on"]["longterm"] = (self.result("longterm") or {}).get("at")
+        if step == "layout":            # and the layout on the buildings: fetching or removing them marks it out of date
+            summary["based_on"]["buildings"] = (self.result("buildings") or {}).get("at")
         self.s["results"][step] = summary
         self.save()
         return summary
@@ -233,7 +242,10 @@ class Project:
         """'done', 'stale' (an earlier step was run again since), 'ready' or 'blocked'."""
         r = self.result(step)
         if r:
-            for n, at in (r.get("based_on") or {}).items():
+            based = dict(r.get("based_on") or {})
+            if step == "layout":
+                based.setdefault("buildings", None)     # a layout from before any buildings were fetched
+            for n, at in based.items():
                 if (self.result(n) or {}).get("at") != at:
                     return "stale"
             return "done"
@@ -244,6 +256,7 @@ class Project:
         out["folder"] = str(self.folder)
         out["steps"] = [{"key": k, "name": STEP_NAMES[k], "status": self.status(k), "result": self.result(k),
                          "needs": [STEP_NAMES[n] for n in NEEDS[k] if not self.result(n)]} for k in STEPS]
+        out["buildings"] = self.result("buildings")
         return out
 
     # ---------- shared pieces ----------
@@ -338,6 +351,28 @@ class Project:
             return constraints.read_features(f)
         except constraints.ConstraintError as e:
             raise ProjectError(str(e)) from e
+
+    def receptors(self, grid) -> tuple:
+        """The homes the siting rules, the noise and the flicker work with: the buildings fetched from open data, if
+        any, with the user's own file on top (environment.buildings.combine). Returns (rows on the terrain, counts
+        by origin)."""
+        from .environment import buildings  # noqa: PLC0415
+        own = self.features("receptors")
+        rel = self.s["layout"].get("buildings_file")
+        fetched = []
+        if rel:
+            f = self.folder / rel
+            if not f.is_file():
+                raise ProjectError(f"The buildings file is missing from the project: {rel}. Get the buildings again, or "
+                                   "remove them under 'Layout and energy'.")
+            try:
+                fetched = buildings.load(f)
+            except buildings.BuildingsError as e:
+                raise ProjectError(str(e)) from e
+        rows, counts = buildings.combine(fetched, own, grid.to_xy)
+        rows = [r for r in rows if grid.inside(r["x"], r["y"])]
+        counts["on_the_terrain"] = len(rows)
+        return rows, counts
 
     def wind_field(self, height_m: float, log=lambda m: None):
         """Wind field at height_m: the stored one if it matches, else computed from the stored terrain."""
@@ -550,8 +585,11 @@ class Project:
             line_buffer_m=_num(R.get("line_buffer_m"), "Buffer along roads and lines", 0, 5000),
             receptor_setback_m=_num(R.get("receptor_setback_m"), "Setback from homes", 0, 5000))
         exclusions, boundary = self.features("exclusions"), self.features("boundary")
-        receptors = constraints.points_of(self.features("receptors"), grid)
-        receptors = [r for r in receptors if grid.inside(r["x"], r["y"])]
+        receptors, origin = self.receptors(grid)
+        if origin["fetched"] or origin["taken_out"] or origin["replaced"]:
+            log(f"Homes: {origin['fetched']:,} buildings from open data and {origin['yours']:,} of your own file"
+                + (f"; your file took {origin['taken_out']:,} buildings out" if origin["taken_out"] else "")
+                + (f" and stands for {origin['replaced']:,} more" if origin["replaced"] else "") + ".")
         mask, rep = constraints.buildable(grid, rules, exclusions=exclusions, receptors=receptors, boundary=boundary,
                                           mean_ws=wf.mean_ws)
         log(f"Buildable area: {rep['buildable_km2']:.1f} km2 after {len(rep['steps']) - 1} rules.")
@@ -604,6 +642,7 @@ class Project:
         res["rules"] = {k: getattr(rules, k) for k in ("radius_km", "slope_max_pct", "elevation_max_m", "min_mean_ws",
                                                        "exclusion_buffer_m", "line_buffer_m", "receptor_setback_m")}
         res["receptors_in_area"] = len(receptors)
+        res["receptor_origin"] = origin
         res["estimate_note"] = ESTIMATE_NOTE
         from .terrain import utm  # noqa: PLC0415
         for p in res["positions"]:
@@ -640,7 +679,7 @@ class Project:
 
     def run_environment(self, log=print) -> dict:
         from . import maps  # noqa: PLC0415
-        from .environment import constraints, flicker, noise  # noqa: PLC0415
+        from .environment import flicker, noise  # noqa: PLC0415
         lay = self.result("layout")
         if not lay:
             raise ProjectError("Place the turbines first (step 4).")
@@ -654,10 +693,10 @@ class Project:
         hub, rotor = float(t["hub_m"]), float(t["rotor_m"])
         wf = self.wind_field(hub, log)
         grid = wf.grid
-        receptors = constraints.points_of(self.features("receptors"), grid)
-        receptors = [r for r in receptors if grid.inside(r["x"], r["y"])]
+        receptors, _ = self.receptors(grid)
         if not receptors:
-            raise ProjectError("There are no homes in the project yet. Under 'Layout and energy', choose a file with one "
+            raise ProjectError("There are no homes in the project yet. Under 'Layout and energy', get the buildings from "
+                               "open data, or choose a file with one "
                                "point per home (GeoJSON, KML or CSV), run the layout again, then come back.")
         turbines = lay["positions"]
         log(f"Noise at {len(receptors)} homes from {len(turbines)} turbines ...")
@@ -710,8 +749,40 @@ class Project:
         out = pack.build(self, log=log)
         return self._store("pack", out)
 
+    def run_buildings(self, log=print) -> dict:
+        """Fetches the buildings round the site from open data, for the siting rules of step 4 and the screening of
+        step 5 (environment.buildings). Not one of the six steps: the layout is run again afterwards."""
+        from . import maps  # noqa: PLC0415
+        from .environment import buildings  # noqa: PLC0415
+        site = self.site()
+        R = self.s["layout"].get("rules") or {}
+        half = _num(R.get("radius_km"), "Search radius", 1, 30) + buildings.MARGIN_KM
+        try:
+            out = buildings.fetch(site["lat"], site["lon"], half, self.path("constraints", buildings.FILE).parent, log=log)
+            rows = buildings.load(self.path("constraints", buildings.FILE))
+        except buildings.BuildingsError as e:
+            raise ProjectError(str(e)) from e
+        out["file"] = f"constraints/{buildings.FILE}"
+        m_lon, m_lat = self._metres(site["lat"])
+        for r in rows:
+            r["x"], r["y"] = (r["lon"] - site["lon"]) * m_lon, (r["lat"] - site["lat"]) * m_lat
+        sub = (f"{self.s['name']}: {out['n_osm']:,} in OpenStreetMap, {out['n_added_from_microsoft']:,} more in Microsoft's "
+               f"footprints, within {out['half_km']:g} km")
+        out["map"] = self.rel(maps.buildings_map(rows, self.path("constraints", "buildings_map.png"), half_km=out["half_km"],
+                                                 subtitle=sub))
+        self.s["layout"]["buildings_file"] = out["file"]
+        out["at"] = f"{datetime.now():%Y-%m-%d %H:%M:%S}"
+        self.s["results"]["buildings"] = out
+        self.save()
+        return out
+
+    @staticmethod
+    def _metres(lat: float) -> tuple:
+        from .terrain import metres_per_degree  # noqa: PLC0415
+        return metres_per_degree(lat)
+
     RUNNERS = {"data": "run_data", "longterm": "run_longterm", "map": "run_map", "layout": "run_layout",
-               "environment": "run_environment", "pack": "run_pack"}
+               "environment": "run_environment", "pack": "run_pack", "buildings": "run_buildings"}
 
     def run(self, step: str, log=print) -> dict:
         if step not in self.RUNNERS:

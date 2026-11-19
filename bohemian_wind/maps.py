@@ -27,13 +27,13 @@ THEMES = {
              # one hue each, dark (near the surface) to light
              "wind": ["#0E2A25", "#14463B", "#1A6652", "#21886B", "#31AC87", "#62CDA6", "#A5E8CC", "#DDF8EC"],
              "noise": ["#3A2416", "#6B3A1C", "#9C5222", "#CC6D2B", "#EC8E4A", "#F8B886"],
-             "mast": "#d95926", "home": "#3987e5"},
+             "mast": "#d95926", "home": "#3987e5", "built": "#D9762F"},
     "light": {"plane": "#FFFFFF", "surface": "#FFFFFF", "ink": "#16202A", "ink2": "#4A5560", "muted": "#7C868F",
               "line": "#DCE3E1", "veil": "#FFFFFF", "marker": "#16202A",
               # one hue each, light (near the surface) to dark
               "wind": ["#EEF7F5", "#CFE9E5", "#A6D6D0", "#74BDB5", "#3F9F97", "#0F827B", "#006560", "#00433F"],
               "noise": ["#FBE9DA", "#F6CBA6", "#EFA872", "#E28446", "#C4622A", "#964719"],
-              "mast": "#eb6834", "home": "#2a78d6"},
+              "mast": "#eb6834", "home": "#2a78d6", "built": "#CF6C2E"},
 }
 STATUS = {"good": "#0ca30c", "warning": "#fab219", "serious": "#ec835a", "critical": "#d03b3b"}   # fixed in both themes
 FOOT = "Developer estimate, Bohemian Renewables, open-source tools. Not an accredited or bankable assessment."
@@ -71,6 +71,7 @@ def _figure(grid: Grid, theme: str, title: str, subtitle: str = "", size: float 
         s.set_color(t["line"])
         s.set_linewidth(0.8)
     ax.tick_params(colors=t["muted"], labelsize=8, length=3, width=0.6)
+    ax.grid(False)                   # the report charts of step 1 switch grid lines on for every later figure
     ax.set_xlabel("km east of the mast", color=t["ink2"], fontsize=8.5)
     ax.set_ylabel("km north of the mast", color=t["ink2"], fontsize=8.5)
     fig.text(0.085, 0.955, title, color=t["ink"], fontsize=13, fontweight="bold", ha="left", va="center")
@@ -289,6 +290,31 @@ def flicker_map(grid: Grid, turbines: list, receptors: list, path, *, rotor_m: f
     _legend(ax, t, handles)
     ax.set_aspect("equal")
     _zoom(ax, grid, turbines, [], range_rotors * rotor_m + 500.0)
+    return _save(fig, path)
+
+
+def buildings_map(rows: list, path, *, half_km: float, theme: str = "dark", title: str = "Buildings from open data",
+                  subtitle: str = "") -> Path:
+    """Where each source knows of buildings. rows: x, y in metres from the site and source ("osm", "microsoft" or
+    "yours"). Drawn without terrain, so it can be made before the wind map exists."""
+    fig, ax, t = _figure(None, theme, title, subtitle)
+    handles = []
+    for key, label, marker, colour, z in (("osm", "In OpenStreetMap", "s", t["home"], 4),
+                                          ("microsoft", "In Microsoft's footprints only", "o", t["built"], 5),
+                                          ("yours", "In your own file", "D", t["marker"], 6)):
+        pts = [r for r in rows if r.get("source") == key]
+        if not pts:
+            continue
+        ms, mew, alpha = _marker(len(pts), 3.6, 0.9)
+        ax.plot([r["x"] / 1000 for r in pts], [r["y"] / 1000 for r in pts], marker=marker, ms=ms, mfc=colour,
+                mec=t["surface"], mew=min(mew, 0.6), alpha=alpha, ls="none", zorder=z)
+        handles.append(Line2D([], [], marker=marker, ms=5, mfc=colour, mec=t["surface"], mew=0.6, ls="none",
+                              label=f"{label} ({len(pts):,})"))
+    handles.append(_mast(ax, t))
+    _legend(ax, t, handles)
+    ax.set_xlim(-half_km, half_km)
+    ax.set_ylim(-half_km, half_km)
+    ax.set_aspect("equal")
     return _save(fig, path)
 
 

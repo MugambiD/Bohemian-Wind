@@ -73,6 +73,12 @@ def _kml(name: str, turbines: list, mast: dict, homes: list, tip_m: float) -> st
     return "".join(parts)
 
 
+def _sources(bld: dict | None) -> str:
+    src = (bld or {}).get("sources") or {}
+    names = [n for k, n in (("osm", "OpenStreetMap"), ("microsoft", "Microsoft's building footprints")) if (src.get(k) or {}).get("ok")]
+    return " and ".join(names) + (f", fetched {bld['fetched']}" if bld and bld.get("fetched") else "") if names else "open data"
+
+
 def build(project, log=print) -> dict:
     """project: bohemian_wind.project.Project with a layout result. Returns the pack's files (paths relative to the
     project folder)."""
@@ -85,6 +91,8 @@ def build(project, log=print) -> dict:
     out_dir = project.path("permitting", f"pack_{stamp}", "x").parent
     t = lay["turbine"]
     files = []
+    origin = lay.get("receptor_origin") or {}                      # where the homes came from (project.receptors)
+    bld = project.result("buildings") if origin.get("fetched") else None
 
     def put(fname: str, what: str) -> Path:
         files.append({"file": project.rel(out_dir / fname), "what": what})
@@ -186,6 +194,16 @@ mean wind speed {data.get('mean_ws', float('nan')):.2f} m/s at {data.get('top_he
 <p>{nz['n_receptors']:,} homes assessed; {nz['over_limit']:,} above the {nz['limit_dba']:g} dB(A) level used here
 ({nz['over_limit_with_uncertainty']:,} with a {nz['uncertainty_db']:g} dB allowance). Sound power {nz['sound_power_dba']:g} dB(A) per turbine.
 Method: {_e(nz['method'])}.</p>""")
+        if origin.get("fetched"):
+            sec.append(f"<p>Where the homes come from: {origin['fetched']:,} buildings from open data ({_e(_sources(bld))})"
+                       + (f" and {origin['yours']:,} marked by the developer" if origin.get("yours") else "")
+                       + (f"; the developer's file took {origin['taken_out']:,} buildings out" if origin.get("taken_out") else "")
+                       + ". Every building is counted as a home. The open data list buildings of every kind, the footprints "
+                       "are machine detections in imagery, and none of it was surveyed on the ground.</p>")
+            gaps = [w for w in (bld or {}).get("warnings") or []]
+            if gaps:
+                sec.append("<div class='flag'><b>Where the building sources disagree</b><ul>"
+                           + "".join(f"<li>{_e(g)}</li>" for g in gaps) + "</ul></div>")
         if (out_dir / "map_noise.png").is_file():
             sec.append("<img class='map' src='map_noise.png' alt='Noise map'>")
         sec.append(_table(["Home", "Level, dB(A)", "With allowance", "Nearest turbine", "Distance, m", "Against the level used"],
@@ -215,6 +233,9 @@ sun, nothing in between). Real flicker is a fraction of this. Stopping turbines 
         sec.append(f"<h2>{n}. Noise and shadow flicker</h2><p>Not included: run step 5 with a file of homes, then build the pack again.</p>")
         n += 1
     credits = list(dict.fromkeys((wmap.get("credits") or []) + ([lt["credit"]] if lt and lt.get("credit") else [])))
+    if origin.get("fetched") and bld:
+        credits += [f"Buildings. {a} The lists of homes in this pack are drawn from it: keep this notice with them."
+                    for a in bld.get("attribution") or []]
     sec.append(f"""<h2>{n}. What this pack is based on</h2>
 <ul>{''.join(f'<li>{_e(x)}</li>' for x in lay.get('notes', []))}</ul>
 <h3>Data sources</h3><ul>{''.join(f'<li>{_e(c)}</li>' for c in credits) or '<li>Project measurements and files supplied by the developer.</li>'}</ul>

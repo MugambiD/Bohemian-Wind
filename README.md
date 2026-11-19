@@ -43,6 +43,7 @@ Honest status of this version (0.2.0-dev). "Working" means it runs end to end an
 | Losses and P50/P90 | **Working with default assumptions** that you can edit. The uncertainty budget is a developer's, not an assessor's. |
 | Shadow flicker and noise | **Working at screening level:** astronomical worst-case flicker; noise after ISO 9613-2 at one frequency. |
 | Your own exclusion zones and buffers | **Working.** GeoJSON, KML, KMZ or CSV; buffers round zones, along lines and from homes; slope and elevation limits. |
+| Homes | **Working, from open data and your own file.** Buildings from OpenStreetMap and from Microsoft's building footprints are downloaded for the site and merged, and the application says where the two disagree. Your own file of homes (placemarks from Google Earth, for example) goes on top. Every building counts as a home; none of it is a survey. |
 | Permitting support | **Working as a pack** of tables, maps and GIS files. It is not legal advice and replaces no study a permit needs. |
 
 Not in it: wind turbine suitability and loads, complex-terrain flow modelling (CFD), electrical design, financial modelling, and anything a lender would call bankable. For those, and for any figure that goes to a financing decision, use an independent accredited assessor.
@@ -55,7 +56,7 @@ Not in it: wind turbine suitability and loads, complex-terrain flow modelling (C
 
 **Try it without any data.** On the first screen choose **Open the demo project**, then **Run all six steps**. The demo is an invented site: mast records with five planted faults, a ridge drawn from a formula, homes and exclusion zones. It runs in about ten seconds and needs no internet.
 
-The application runs on your computer only. It opens in your browser, but nothing is uploaded: the only things it downloads are NASA POWER reference data and SRTM terrain tiles for the mast's position.
+The application runs on your computer only. It opens in your browser, but nothing is uploaded: the only things it downloads are NASA POWER reference data and SRTM terrain tiles for the mast's position and, when you ask for them, the buildings round it from OpenStreetMap and from Microsoft's building footprints.
 
 ## Daily intake
 
@@ -84,7 +85,7 @@ bohemian_wind/
   qc.py analysis.py report.py ...   step 1 engine         climate.py     hand-off from step 1 to the rest
   longterm/       step 2                                  terrain.py     SRTM tiles, local grid, UTM
   flow/           step 3: linear model and wind fields    energy/        step 4: turbines, placement, wakes, losses, P50/P90
-  environment/    constraints, noise, sun, flicker        permitting/    step 6: the pack
+  environment/    constraints, buildings, noise, flicker  permitting/    step 6: the pack
   maps.py         map pictures                            project.py     a project folder and its six steps
   app/            the local web application               demo.py        the invented demo project
 ```

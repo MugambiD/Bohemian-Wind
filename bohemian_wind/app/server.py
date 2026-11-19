@@ -162,7 +162,7 @@ class App:
 
     def start(self, steps: list) -> dict:
         project = self.need_project()
-        steps = [s for s in steps if s in STEPS]
+        steps = [s for s in steps if s in Project.RUNNERS]       # the six steps, and fetching the buildings for step 4
         if not steps:
             raise ProjectError("Nothing to run.")
         if self.busy():
