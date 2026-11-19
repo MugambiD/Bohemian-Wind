@@ -180,7 +180,7 @@ def test_a_layout_of_your_own_is_taken_as_given(project, tmp_path):
     assert any(w.startswith(f"1 of the 2 turbine positions given lies more than {r_km:g} km from the mast") and "is left out" in w
                for w in res["warnings"])
     assert (p.folder / "layout" / "beyond_radius.csv").read_text(encoding="utf-8").splitlines()[1].startswith("Far away,")
-    assert any("1 more lies farther out" in line for line in said)
+    assert any("1 more lies farther out" in line and line.endswith("km at most) and is left out.") for line in said)
     pack = p.run("pack", log=quiet)
     assert (p.folder / pack["folder"] / "turbines_left_out.csv").is_file()
     # none within the radius: the run stops and says what to do

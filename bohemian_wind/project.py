@@ -863,7 +863,7 @@ class Project:
             log(f"Using the {n} turbine positions given in {self.s['layout']['positions_file']} that lie within {rules.radius_km:g} km of "
                 "the mast: the layout is taken as it is."
                 + (f" {len(beyond)} more {'lies' if len(beyond) == 1 else 'lie'} farther out ({max(g['dist_km'] for g in beyond):.1f} km "
-                   "at most) and {'is' if len(beyond) == 1 else 'are'} left out." if beyond else ""))
+                   f"at most) and {'is' if len(beyond) == 1 else 'are'} left out." if beyond else ""))
         try:
             res = assess.design(wf, clim, mask, turbine, n, lt_factor=scale["scale"], alpha=alpha, rho_hub=rho, fixed_xy=fixed,
                                 cross_d=_num(L.get("cross_d"), "Spacing across the wind", 1.5, 15),
