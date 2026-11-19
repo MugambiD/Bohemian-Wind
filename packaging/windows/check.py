@@ -106,7 +106,7 @@ def installer(out: Path) -> None:
     exe = exes[0]
     if registered():
         raise CheckError(f"Bohemian Wind is already installed here ({registered()}): this check installs and removes it.")
-    scratch = Path(tempfile.mkdtemp(prefix="bw-check-"))
+    scratch = Path(tempfile.mkdtemp(prefix="bw-check-")).resolve()      # the long form: Windows may hand out C:\Users\RUNNER~1\...
     target = scratch / "Bohemian Wind"                 # a folder name with a space, as a user's would have
     person = scratch / "user folder"                   # the application's settings and log go here, not to the real user
     person.mkdir()
@@ -137,9 +137,10 @@ def installer(out: Path) -> None:
         if r.returncode or not seen:
             raise CheckError(f"the installed Python does not start cleanly:\n{r.stdout}\n{r.stderr[-2000:]}")
         where, version, _, path = [x.strip() for x in seen[5:].split("|")]
-        inside = str(target.resolve()).lower()
-        if not where.lower().startswith(inside) or any(p and not p.lower().startswith(inside) for p in path.split(";")):
-            raise CheckError(f"the installed copy looks outside its folder: {seen}")
+        inside = target.resolve()
+        stray = [p for p in [where, *path.split(";")] if p and inside not in [Path(p).resolve(), *Path(p).resolve().parents]]
+        if stray:
+            raise CheckError(f"the installed copy looks outside its folder {inside}: {stray}")
         say(f"   Bohemian Wind {version} from {where}")
 
         say("3. The demo project, all six steps, by the installed copy")
