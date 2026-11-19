@@ -19,11 +19,12 @@ import traceback
 import urllib.parse
 import webbrowser
 from datetime import datetime
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
 from .. import APP_NOTICE, __version__
 from ..project import STEPS, Project, ProjectError, describe
+from .early import Server, bind
 
 STATIC = Path(__file__).resolve().parent / "static"
 CONFIG = Path.home() / ".bohemian-wind" / "config.json"
@@ -435,29 +436,23 @@ class Handler(BaseHTTPRequestHandler):
             self._fail(500, f"{type(e).__name__}: {e}")
 
 
-class Server(ThreadingHTTPServer):
-    daemon_threads = True
-    # On Windows "reuse address" lets a second program listen on a port that is already taken, so two copies of the
-    # application would answer on one port in turn. Switched off there, a taken port is refused and the next is tried.
-    allow_reuse_address = not sys.platform.startswith("win")
+def serve(port: int = 8765, open_browser: bool = True, project=None, quiet: bool = False, server: Server | None = None):
+    """Start the application. Returns (server, app, url); call server.serve_forever() to run it.
 
-
-def serve(port: int = 8765, open_browser: bool = True, project=None, quiet: bool = False):
-    """Start the application. Returns (server, app, url); call server.serve_forever() to run it."""
+    `server`: a port that is held already and shows the starting page (early.bind): the application takes it over,
+    and the next request is answered by the application. Without one, the first free port from `port` on is taken.
+    """
     app = App()
     if project:
         app.set_project(Project.open(project))
-    server = None
-    for p in range(port, port + 30):
-        try:
-            handler = type("BoundHandler", (Handler,), {"app": app, "port": p})
-            server = Server(("127.0.0.1", p), handler)
-            break
-        except OSError:
-            continue
     if server is None:
-        raise SystemExit(f"No free port between {port} and {port + 29}. Close the other copy of Bohemian Wind and start again.")
-    url = f"http://127.0.0.1:{server.server_address[1]}/"
+        try:
+            server = bind(port)
+        except OSError as e:
+            raise SystemExit(f"{e} Close the other copy of Bohemian Wind and start again.") from None
+    p = server.server_address[1]
+    server.RequestHandlerClass = type("BoundHandler", (Handler,), {"app": app, "port": p})
+    url = f"http://127.0.0.1:{p}/"
     if not quiet:
         print(f"Bohemian Wind v{__version__} is running at {url}\n{APP_NOTICE}\nKeep this window open while you work. "
               "Close it (or press Ctrl+C) to stop.", flush=True)

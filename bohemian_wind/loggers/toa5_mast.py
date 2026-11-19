@@ -10,8 +10,8 @@ time series exports (loggers/windpro.py).
          [--settings <site settings .json>] [--extract] [--power-daily <.json> --power-monthly <.json>]
 
 Data folders: every *.dat TOA5 file under them is read (CR1000X, CR6 and other Campbell loggers, e.g. the daily
-DATA_10MIN<n>.dat files). With --extract, RAR archives in the first folder are first extracted to
-<out>/converted/<folder name>/ (needs the unrar2-cffi package) and that folder is read too.
+DATA_10MIN<n>.dat files). With --extract, the archives in the first folder (ZIP, RAR, 7z, tar) are first unpacked
+to <out>/converted/<folder name>/ and that folder is read too.
 Column names carry the sensor and its logged height: V1_124m_Avg is cup V1 at 124 m, D1_117m_Std the standard
 deviation of vane D1 at 117 m; TA, RH and PA are temperature, humidity and pressure.
 
@@ -114,26 +114,11 @@ G, R_DRY, R_VAP = 9.80665, 287.05, 461.5
 
 # ---------- reading ----------
 
-def extract_rars(folder: Path, dest: Path, log=print) -> int:
-    """Extract every .rar under folder to dest/<archive name>/ (flat). Needs unrar2-cffi."""
-    from unrar.cffi import rarfile  # noqa: PLC0415
-    n = 0
-    for rp_ in sorted(folder.rglob("*.rar")):
-        out = dest / rp_.stem
-        out.mkdir(parents=True, exist_ok=True)
-        rf = rarfile.RarFile(str(rp_))
-        for m in rf.namelist():
-            base = m.replace("\\", "/").rstrip("/").split("/")[-1]
-            if not base.lower().endswith(".dat"):
-                continue
-            data = rf.read(m)
-            target = out / base
-            if target.exists() and target.read_bytes() == data:
-                continue
-            target.write_bytes(data)
-            n += 1
-    log(f"  extracted {n} new .dat files to {dest}")
-    return n
+def extract_archives(folder: Path, dest: Path, log=print) -> int:
+    """Unpack the logger files of every archive under folder to dest/<archive name>/ (see intake/unpack.py)."""
+    from ..intake import unpack  # noqa: PLC0415
+    found = unpack.find(folder)
+    return unpack.unpack(found, folder, dest, log=log)["now"] if found else 0
 
 
 def read_toa5(path: Path):
@@ -721,11 +706,11 @@ def _xl(df: pd.DataFrame) -> pd.DataFrame:
 def main(argv=None, log=None):
     """log: where progress lines go (default: print). Problems the user can fix are raised as SystemExit."""
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("folders", nargs="+", help="data folders holding TOA5 .dat files (and RAR archives with --extract)")
+    ap.add_argument("folders", nargs="+", help="data folders holding TOA5 .dat files (and archives of them with --extract)")
     ap.add_argument("--out", required=True, help="Bohemian Wind QC outputs folder")
     ap.add_argument("--name", help="site name for the run folder and outputs")
     ap.add_argument("--settings", help="site settings .json: site_name, elevation_m, source, notes")
-    ap.add_argument("--extract", action="store_true", help="extract RAR archives in the first folder first")
+    ap.add_argument("--extract", action="store_true", help="unpack the archives in the first folder first")
     ap.add_argument("--power-daily", help="NASA POWER daily point JSON (WS50M, WD50M) for the long-term index")
     ap.add_argument("--power-monthly", help="NASA POWER monthly point JSON (WS50M)")
     ap.add_argument("--lt-years", default="2005-2024", help="long-term reference years, e.g. 2005-2024")
@@ -754,8 +739,7 @@ def main(argv=None, log=None):
     say(f"Input: {', '.join(str(f) for f in folders)}")
     say(f"Output: {run_dir}")
     if a.extract:
-        say("Extracting RAR archives ...")
-        extract_rars(raw, converted, log=say)
+        extract_archives(raw, converted, log=say)
     if converted.exists() and converted.resolve() not in [f.resolve() for f in folders]:
         folders.append(converted)
     say("Reading logger files ...")

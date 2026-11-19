@@ -30,6 +30,7 @@ import numpy as np
 
 from . import APP_NOTICE, DISCLAIMER, __version__
 from . import climate as _climate
+from . import paths
 
 FILE = "project.json"
 STEPS = ("data", "longterm", "map", "layout", "environment", "pack")
@@ -259,7 +260,7 @@ class Project:
         if not path:
             return None
         p = Path(str(path))
-        return p if p.is_absolute() else self.folder / p
+        return paths.tidy(p if p.is_absolute() else self.folder / p)
 
     # ---------- settings ----------
 
@@ -622,7 +623,7 @@ class Project:
             raise ProjectError("Choose the folder that holds the mast's logger files.")
         src = self.resolve(folder)
         if not src.exists():
-            raise ProjectError(f"The data folder was not found: {src}")
+            raise ProjectError(f"The data folder was not found: {src}{paths.too_long(src)}")
         settings_path = None
         s = self.s["site"]
         vals = {}                       # only what replaces the logger's own values; the name travels separately
@@ -1054,7 +1055,14 @@ class Project:
     def run(self, step: str, log=print) -> dict:
         if step not in self.RUNNERS:
             raise ProjectError(f"Unknown step '{step}'.")
-        return getattr(self, self.RUNNERS[step])(log=log)
+        try:
+            return getattr(self, self.RUNNERS[step])(log=log)
+        except OSError as e:
+            # Windows reports a file whose path is too long as missing: say what the trouble really is
+            name = getattr(e, "filename", None)
+            if name and paths.too_long(name):
+                raise ProjectError(f"Windows could not reach {name}{paths.too_long(name)}.") from e
+            raise
 
 
 def describe() -> dict:

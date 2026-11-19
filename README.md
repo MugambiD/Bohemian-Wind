@@ -18,7 +18,7 @@ Six steps, in order. Each screen asks for what it needs on the left and shows wh
 
 | Step | What you give it | What you get |
 |---|---|---|
-| 1. **Mast data** | The folder with the logger files | Bad records flagged, wind speed, shear, turbulence, wind rose, a report |
+| 1. **Mast data** | The folder with the logger files, or with the archives they came in | Bad records flagged, wind speed, shear, turbulence, wind rose, a report |
 | 2. **Long-term correction** | Nothing (it downloads the reference) | The measured wind scaled to a 20-year average |
 | 3. **Wind map** | A height and an area | Mean wind speed over the terrain round the mast |
 | 4. **Layout and energy** | Turbine size and number; your exclusion zones, homes and buffers | Turbine positions, wake loss, P50, P75 and P90 |
@@ -29,12 +29,12 @@ Six steps, in order. Each screen asks for what it needs on the left and shows wh
 
 ## Where each part stands
 
-Honest status of this version (0.2.0-dev). "Working" means it runs end to end and is covered by tests with known answers; it does not mean validated against measurements.
+Honest status of this version (0.2.1-dev). "Working" means it runs end to end and is covered by tests with known answers; it does not mean validated against measurements.
 
 | Capability | State |
 |---|---|
 | Daily mast data arriving automatically | **Working as a folder watch.** It re-runs the checks when logger files appear and warns when data stops. It does not fetch from the logger, its email or its cloud service: point those at the folder. |
-| Data quality checks and analysis | **Working** for NRG SymphoniePRO, NRG Symphonie text exports (Symphonie Data Retriever), Campbell Scientific TOA5, SecondWind Nomad2 and WindPRO time series exports. RLD files need NRG's free SymPRO Desktop (Windows) to convert them, raw RWD files NRG's free Symphonie Data Retriever. |
+| Data quality checks and analysis | **Working** for NRG SymphoniePRO, NRG Symphonie text exports (Symphonie Data Retriever), Campbell Scientific TOA5, SecondWind Nomad2 and WindPRO time series exports. RLD files need NRG's free SymPRO Desktop (Windows) to convert them, raw RWD files NRG's free Symphonie Data Retriever. ZIP, RAR, 7z and tar archives of logger files are opened as they are; RAR and 7z with the archive program the computer already has. |
 | Long-term correction | **Working, one method:** a monthly index against NASA POWER (MERRA-2 at 50 m), with a check of the vane's north against the reanalysis wind direction. No second reference, no hourly method yet. |
 | Wind resource maps | **Working, two methods:** the own flow model over SRTM terrain, or the Global Wind Atlas pattern scaled to the mast. |
 | Own flow model | **First version.** Terrain speed-up from linear theory (Jackson and Hunt). Tested against theory only, not yet against measured hills or a second mast. Not for steep terrain. |

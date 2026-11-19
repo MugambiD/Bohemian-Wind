@@ -15,7 +15,16 @@ Bohemian Wind is Bohemian Renewables' own code under the MIT licence. It uses th
 | PyWake (DTU Wind and Energy Systems) | MIT | wake models, generic turbines, annual energy | https://gitlab.windenergy.dtu.dk/TOPFARM/PyWake |
 | h5py, h5netcdf, netCDF4, autograd and the other packages PyWake installs | BSD-3-Clause or MIT | required by PyWake | see each package |
 | rasterio (optional) | BSD-3-Clause | reading Global Wind Atlas GeoTIFF files | https://rasterio.readthedocs.io |
-| unrar2-cffi (optional) | MIT wrapper; UnRAR source under the UnRAR licence (free to use, may not be used to build a RAR archiver) | opening RAR archives of logger files | https://github.com/Noiredd/unrar2-cffi |
+| unrar2-cffi (optional, never shipped) | MIT wrapper; UnRAR source under the UnRAR licence (free to use, may not be used to build a RAR archiver) | opening RAR archives of logger files on a computer that has no archive program of its own (see below) | https://github.com/Noiredd/unrar2-cffi |
+
+## Programs of the computer that are used, not shipped
+
+| Program | Licence | Used for |
+|---|---|---|
+| The archive program of the operating system: `tar.exe` of Windows 10 and 11, `tar` of macOS, `bsdtar` on Linux (all built on libarchive) | BSD-2-Clause (libarchive); part of the operating system | opening RAR and 7z archives of logger files |
+| 7-Zip, WinRAR's UnRAR, where the user has installed them | their own licences; the user's own copy | the same, where the program above cannot open an archive |
+
+[COMPLIANCE] Nothing that opens RAR archives is part of Bohemian Wind or of its setup program. The RAR method is not open (UnRAR's licence forbids using its source to build a RAR archiver), so it is left to programs the computer already has. ZIP and tar archives are opened with Python's own library.
 
 ## Shipped with the program
 

@@ -18,11 +18,19 @@ no administrator rights, no Python to install first, no internet needed.
 - **One click, one window.** The Start-menu entry starts the application without a console window. It opens in a
   window of its own (Microsoft Edge or Google Chrome showing only the application, whichever is your default
   browser first), or in a tab of your default browser where neither is installed.
-- **One copy.** Starting it again while it runs opens a window on the copy that is running.
+- **Something to see at once.** The window opens straight away on a page that says the application is starting,
+  and fills in by itself. Loading takes a few seconds; the first time after installing it can take up to a minute,
+  because the virus scanner reads every new file first.
+- **One copy.** Starting it again while it runs, or while it is still starting, opens a window on that copy.
 - **It stops when you close it.** A few seconds after its last window is closed the application ends, unless a step
   is still running: then it finishes the step first. Reloading the page does not end it.
 - **Its messages** go to `app.log` in the folder `.bohemian-wind` of your user folder. Send that file along when you
   report a problem; it holds no measurements.
+- **Long paths.** Windows allows a path 259 characters unless "long paths" are switched on. Where a file cannot be
+  reached for that reason, the message says so and gives the length; a data folder kept in the project as steps
+  back from the project folder (`..\..\data`) is worked out first, so the detour does not count.
+- **Archives.** ZIP, RAR, 7z and tar archives of logger files are opened as they are. For RAR and 7z the archive
+  program of Windows itself is used (`tar.exe`, part of Windows 10 and 11); nothing that opens RAR is shipped.
 - To have it open in a tab of your normal browser in every case, set the environment variable
   `BOHEMIAN_WIND_WINDOW=browser`.
 

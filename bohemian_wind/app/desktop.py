@@ -7,6 +7,7 @@ Started this way the application
   * keeps its messages in ~/.bohemian-wind/app.log, because there is no console window to print them in;
   * opens in a window of its own where the computer has Microsoft Edge or Google Chrome, and in the default
     browser otherwise (BOHEMIAN_WIND_WINDOW=browser asks for the default browser in every case);
+  * opens that window at once, on a page that says it is starting, and loads behind it (see early.py);
   * stops by itself a few seconds after its last window is closed, unless a step is still running.
 
 A second start does not start a second copy: it opens a window on the one that is running.
@@ -22,6 +23,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import urllib.request
 import webbrowser
 from datetime import datetime
@@ -30,6 +32,7 @@ from pathlib import Path
 from .. import __version__
 
 CLOSE_AFTER_S = float(os.environ.get("BOHEMIAN_WIND_CLOSE_AFTER_S") or 8.0)   # a reload of the page takes a second or two
+FAILED_SHOWN_S = 60.0               # how long a start that failed keeps its window able to say why
 NO_WINDOW_S = 600.0                 # no window ever loaded the page: nothing is using this copy
 LOG_KEEP = 1_000_000                # the log starts again from its last fifth when it passes this size (bytes)
 PORTS = range(8765, 8795)
@@ -44,10 +47,11 @@ def say(msg: str) -> None:
     print(f"{datetime.now():%Y-%m-%d %H:%M:%S}  {msg}", flush=True)
 
 
-def keep_a_log() -> None:
-    """Started without a console (pythonw), Python has nowhere to print: messages and errors go to a file."""
+def keep_a_log() -> bool:
+    """Started without a console (pythonw), Python has nowhere to print: messages and errors go to a file.
+    True when they do."""
     if sys.stdout is not None and sys.stderr is not None:
-        return
+        return False
     try:
         home().mkdir(parents=True, exist_ok=True)
         log = home() / "app.log"
@@ -63,6 +67,7 @@ def keep_a_log() -> None:
         faulthandler.enable(fh)
     except (ImportError, OSError, ValueError, AttributeError):
         pass
+    return True
 
 
 # ---------- one copy at a time ----------
@@ -106,12 +111,24 @@ def single_copy():
     return _Held(fh.close)
 
 
-def ping(port: int, timeout: float = 1.5) -> bool:
+def _ping(port: int, timeout: float) -> dict:
     try:
         with _LOCAL.open(f"http://127.0.0.1:{port}/ping", timeout=timeout) as r:
-            return json.loads(r.read()).get("app") == "bohemian-wind"
-    except (OSError, ValueError, AttributeError):
-        return False
+            answer = json.loads(r.read())
+        return answer if isinstance(answer, dict) and answer.get("app") == "bohemian-wind" else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def ping(port: int, timeout: float = 1.5) -> bool:
+    """A copy of the application holds this port: loaded, or still starting."""
+    return bool(_ping(port, timeout))
+
+
+def loaded(port: int, timeout: float = 1.5) -> bool:
+    """The copy on this port has finished starting: it shows its own page and takes requests."""
+    answer = _ping(port, timeout)
+    return bool(answer) and not answer.get("starting")
 
 
 def running_port() -> int | None:
@@ -134,11 +151,15 @@ def wait_for_running(seconds: float) -> int | None:
         time.sleep(0.5)
 
 
-def quit_running(wait: float = 15.0) -> bool:
-    """Ask the running copy to stop and wait until it has. True when one was running and is gone."""
+def quit_running(wait: float = 15.0, starting: float = 180.0) -> bool:
+    """Ask the running copy to stop and wait until it has. True when one was running and is gone.
+    A copy that is still starting is waited for first: only the loaded application can be asked to stop."""
     port = running_port()
     if port is None:
         return False
+    t0 = time.time()
+    while ping(port, 0.5) and not loaded(port, 0.5) and time.time() - t0 < starting:
+        time.sleep(0.3)
     try:
         with _LOCAL.open(f"http://127.0.0.1:{port}/", timeout=5) as r:
             token = re.search(r'name="bw-token" content="([^"]+)"', r.read().decode("utf-8", "replace")).group(1)
@@ -221,7 +242,7 @@ def main(argv=None) -> int:
     ap.add_argument("--no-window", action="store_true", help="start without opening a window")
     ap.add_argument("--quit", action="store_true", help="stop the copy that is running")
     args = ap.parse_args(argv)
-    keep_a_log()
+    in_file = keep_a_log()
     if args.quit:
         say("Bohemian Wind was running and has stopped." if quit_running() else "Bohemian Wind was not running.")
         return 0
@@ -235,30 +256,55 @@ def main(argv=None) -> int:
             return 0
         say("Another copy holds the lock but does not answer: starting this one.")
 
-    from .server import serve  # noqa: PLC0415  (the heavy imports come after the quick answers above)
-    server, app, url = serve(args.port, open_browser=False, project=args.project, quiet=True)
-    state = home() / "app.json"
+    # The port is taken and the window opened before the application is loaded: loading takes seconds, and the
+    # first time after installing up to a minute. Until then the window shows the starting page (early.py).
+    from . import early  # noqa: PLC0415
     try:
-        state.write_text(json.dumps({"port": server.server_address[1], "pid": os.getpid(),
-                                     "started": f"{datetime.now():%Y-%m-%d %H:%M:%S}", "version": __version__}), encoding="utf-8")
-    except OSError:
-        pass
-    say(f"Bohemian Wind v{__version__} is running at {url} (Python {sys.version.split()[0]}, {sys.platform}).")
-    threading.Thread(target=watch, args=(server, app, time.time()), daemon=True).start()
+        server = early.bind(args.port)
+    except OSError as e:
+        say(f"{e} Close the other copy of Bohemian Wind and start again.")
+        return 1
+    server.log_file = str(home() / "app.log") if in_file else ""
+    url = f"http://127.0.0.1:{server.server_address[1]}/"
+    serving = threading.Thread(target=server.serve_forever, name="serving", daemon=True)
+    serving.start()
+    t0 = time.time()
     if not args.no_window:
         say(f"Window: {open_window(url)}.")
+    state = home() / "app.json"
     try:
-        server.serve_forever()
+        try:
+            from .server import serve  # noqa: PLC0415  (numpy, pandas and the rest: the slow part)
+            _, app, url = serve(open_browser=False, project=args.project, quiet=True, server=server)
+        except BaseException as e:  # noqa: BLE001  (whatever it is, the open window must be able to say so)
+            if isinstance(e, KeyboardInterrupt):
+                raise
+            traceback.print_exc()
+            server.failed = str(e) or type(e).__name__
+            say(f"Bohemian Wind could not start: {server.failed}")
+            time.sleep(0 if args.no_window else FAILED_SHOWN_S)
+            return 1
+        try:
+            state.write_text(json.dumps({"port": server.server_address[1], "pid": os.getpid(),
+                                         "started": f"{datetime.now():%Y-%m-%d %H:%M:%S}", "version": __version__}), encoding="utf-8")
+        except OSError:
+            pass
+        say(f"Bohemian Wind v{__version__} is running at {url} (Python {sys.version.split()[0]}, {sys.platform}; "
+            f"loaded in {time.time() - t0:.1f} s).")
+        threading.Thread(target=watch, args=(server, app, time.time()), daemon=True).start()
+        while serving.is_alive():
+            serving.join(0.5)
     except KeyboardInterrupt:
         say("Stopped.")
     finally:
+        server.shutdown()
         server.server_close()
         try:
             state.unlink()
         except OSError:
             pass
-    if held is not None:
-        held.close()
+        if held is not None:
+            held.close()
     return 0
 
 

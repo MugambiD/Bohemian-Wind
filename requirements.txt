@@ -8,4 +8,5 @@ xarray>=2024.1
 py_wake>=2.6
 h5py>=3.10
 # Optional, for the "Global Wind Atlas pattern" map method only:   pip install rasterio
-# Optional, to open RAR archives of Campbell logger files:          pip install unrar2-cffi
+# RAR and 7z archives of logger files are opened with the archive program of the computer (tar.exe on Windows 10
+# and 11, tar on macOS, bsdtar or 7-Zip on Linux). Only where none of these exists:   pip install unrar2-cffi

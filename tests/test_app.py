@@ -207,6 +207,46 @@ def test_project_guards(tmp_path):
     assert p.s["map"]["res_m"] == 50.0                                 # the default cell follows narrow ridges
 
 
+def test_a_far_data_folder_is_found_on_windows_and_a_path_too_long_for_windows_is_named(tmp_path, monkeypatch):
+    """Windows measures a path as it is written: ..\\..\\..\\data from a deep project can pass the 259 characters it
+    allows although the folder it leads to has a short path. Found on a real PC, never on Linux."""
+    from bohemian_wind import paths as pm
+    p = Project.create(tmp_path / "projects" / "a" / "b", "Deep")
+    (tmp_path / "data").mkdir()
+    p.update("data", {"folder": "../../../data"})
+
+    monkeypatch.setattr(pm, "WINDOWS", False)                      # elsewhere the path is used as it is written
+    assert ".." in p.resolve(p.s["data"]["folder"]).parts and p.resolve(p.s["data"]["folder"]).is_dir()
+
+    monkeypatch.setattr(pm, "WINDOWS", True)                       # on Windows the steps back are worked out first
+    found = p.resolve(p.s["data"]["folder"])
+    assert ".." not in found.parts and found == tmp_path / "data" and found.is_dir()
+    assert p.resolve(str(tmp_path / "data")) == tmp_path / "data"  # a path without steps back stays what it is
+    assert p.resolve("") is None
+
+    # a path that really is too long: the message says so, instead of only "not found"
+    long = tmp_path.joinpath(*("folder_with_a_long_name_" + c * 40 for c in "abcde"))
+    assert len(str(long)) > 259
+    p.update("data", {"folder": str(long)})
+    with pytest.raises(ProjectError, match="was not found.*Windows allows 259"):
+        p.run("data", log=quiet)
+
+    def boom(log=print):
+        raise FileNotFoundError(2, "No such file or directory", str(long / "out.csv"))
+    monkeypatch.setattr(p, "run_data", boom)                       # a step that cannot write its file for the same reason
+    with pytest.raises(ProjectError, match="could not reach.*Windows allows 259"):
+        p.run("data", log=quiet)
+
+    monkeypatch.setattr(pm, "WINDOWS", False)                      # elsewhere such a path is no trouble of its own
+    with pytest.raises(FileNotFoundError):
+        p.run("data", log=quiet)
+    monkeypatch.undo()
+    p.update("data", {"folder": str(tmp_path / "missing")})
+    with pytest.raises(ProjectError, match="was not found") as e:
+        p.run("data", log=quiet)
+    assert "characters" not in str(e.value)
+
+
 def test_a_map_too_big_to_hold_is_refused_with_a_cell_size_that_fits(project, tmp_path):
     import shutil
     copy = tmp_path / "copy"
@@ -229,6 +269,25 @@ def test_intake_detects_formats(tmp_path, project):
     assert intake.folder_signature(tmp_path) != sig
     with pytest.raises(intake.IntakeError):
         intake.detect(tmp_path / "missing")
+
+
+def test_files_that_cannot_be_opened_are_called_that_and_not_an_unknown_format(tmp_path, monkeypatch):
+    """On Windows a file whose path is too long is listed in its folder and cannot be opened. That is no matter of
+    format: the message must not send the user looking for a converter. (Seen on a real PC: "400 .dat in a format
+    this version does not read", for files the same version reads.)"""
+    folder = tmp_path / "mast"
+    folder.mkdir()
+    for i in range(3):
+        (folder / f"DATA_{i}.dat").write_text('"TOA5","logger"\n', encoding="utf-8")
+    det = intake.detect(folder)
+    assert det["format"] == "toa5" and det["blocked"] == 0
+
+    monkeypatch.setattr(intake, "_head", lambda f: (None, "No such file or directory"))
+    det = intake.detect(folder)
+    assert det["format"] is None and det["blocked"] == 3 and not det["unread"]
+    assert det["found"] == "3 files that could not be opened (the first: No such file or directory)"
+    with pytest.raises(intake.IntakeError, match="3 files that could not be opened"):
+        intake.run_checks(folder, tmp_path / "out", log=quiet)
 
 
 def test_daily_intake_runs_only_on_new_files_and_alerts_when_silent(project, tmp_path):

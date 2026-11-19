@@ -260,7 +260,7 @@
   // ---------- inputs per step ----------
   const INPUTS = {
     data() {
-      return card('What to check', fText('data', 'folder', 'Folder with the logger files', { pick: 'folder', help: 'One mast per folder. NRG SymphoniePRO (.rld or .txt), NRG Symphonie text exports (.txt from Symphonie Data Retriever), Campbell TOA5 (.dat), a Nomad2 export or a WindPRO time series export.' })
+      return card('What to check', fText('data', 'folder', 'Folder with the logger files', { pick: 'folder', help: 'One mast per folder. NRG SymphoniePRO (.rld or .txt), NRG Symphonie text exports (.txt from Symphonie Data Retriever), Campbell TOA5 (.dat), a Nomad2 export or a WindPRO time series export. ZIP, RAR, 7z and tar archives of these files are opened as they are: nothing needs unpacking first.' })
         + fText('name', 'name', 'Name on the report')
         + `<details class="more"${ok(S.project.site.lat) || ok(S.project.site.elevation_m) || Number(S.project.data.direction_offset_deg) || ok(S.project.data.shear_alpha) ? ' open' : ''}><summary>Mast position, elevation, vane and shear</summary>
            <div class="row2">${fNum('site', 'lat', 'Latitude', { placeholder: 'from the logger' })}${fNum('site', 'lon', 'Longitude', { placeholder: 'from the logger' })}</div>
