@@ -107,6 +107,16 @@
       "where": "licenses/Python-LICENSE.txt and python/tcl/*/license.terms"
     },
     {
+      "name": "LibTomMath",
+      "licence": "Unlicense (public domain)",
+      "source": "https://www.libtom.net/LibTomMath/",
+      "files": [
+        "libtommath.dll",
+        "tommath.dll"
+      ],
+      "text": "LibTomMath.txt"
+    },
+    {
       "name": "zlib",
       "licence": "Zlib",
       "source": "https://zlib.net",
