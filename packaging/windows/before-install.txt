@@ -1,0 +1,14 @@
+Bohemian Wind
+
+From met mast data to a permitting pack: data checks, long-term correction, wind map, layout and energy, noise and shadow flicker, and the pack.
+
+Developer estimates prepared by Bohemian Renewables with open-source tools. Nothing here is an accredited or bankable assessment, and it must not be used for financing decisions.
+
+WHAT THIS SETUP DOES
+It installs the program for you alone, without administrator rights, with its own copy of Python and of the open-source packages it needs. It changes nothing else on this computer, and you can remove it again under Settings, Apps.
+
+YOUR DATA STAYS HERE
+The program runs on this computer only and sends nothing anywhere. It downloads only what a project asks for: reference wind data (NASA POWER), terrain heights (SRTM) and, when you press "Get buildings", building outlines (OpenStreetMap and Microsoft). Projects are kept in Documents\Bohemian Wind unless you choose another folder; removing the program leaves them where they are.
+
+LICENCES
+Bohemian Wind is under the MIT licence, shown on the previous page. Python and the packages come under their own open-source licences. All of them are in the folder "licenses" of the installation; PACKAGES.txt and LIBRARIES.txt there say what is inside and under which licence.

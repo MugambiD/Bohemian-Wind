@@ -50,7 +50,9 @@ Not in it: wind turbine suitability and loads, complex-terrain flow modelling (C
 
 ## Start
 
-**Windows.** Install [Python 3.12](https://www.python.org/downloads/) once (tick *Add python.exe to PATH*). Download this repository (green **Code** button, **Download ZIP**), unzip it, and double-click **`Start Bohemian Wind.bat`**. The first start sets itself up (a few minutes, needs the internet once); after that it opens in your browser in seconds.
+**Windows, with the setup program.** Run `BohemianWind-<version>-Setup.exe`. It installs for you alone, without administrator rights, with its own Python and every package inside: nothing else to install, and no internet needed. Start **Bohemian Wind** from the Start menu; it opens in a window of its own and stops when you close that window. The setup program is built by this repository's build server for every change to `main` (*Actions*, *windows installer*, the artifact *BohemianWind-Setup*; GitHub asks you to sign in to download it), and only after the server has run every test with what is inside it, installed it, used it and removed it again. It is not signed yet, so Windows asks once whether to run it (*More info*, then *Run anyway*). What is inside and how it is built: [docs/windows-installer.md](docs/windows-installer.md).
+
+**Windows, from the source.** Install [Python 3.12](https://www.python.org/downloads/) once (tick *Add python.exe to PATH*). Download this repository (green **Code** button, **Download ZIP**), unzip it, and double-click **`Start Bohemian Wind.bat`**. The first start sets itself up (a few minutes, needs the internet once); after that it opens in your browser in seconds.
 
 **macOS or Linux.** `./start.sh`
 
@@ -75,7 +77,7 @@ pip install -r requirements.txt
 python main.py                        # the application
 python main.py demo demo-project      # build the demo project and run every step
 python main.py run "<project folder>" layout environment pack
-python main.py qc "<mast data folder>"   # the data checks alone, as before
+python main.py qc "<mast data folder>"   # the data checks alone, for every logger format the application reads
 python -m pytest tests -q
 ```
 
@@ -98,6 +100,7 @@ How each step works, with its limits: [docs/workflow.md](docs/workflow.md). Desi
 - **Planted faults.** The demo mast and a synthetic SymphoniePRO mast carry gaps, dead cups, stuck vanes, spikes and out-of-range gusts; every one must be found.
 - **The whole chain.** The demo project runs through all six steps in the tests, and every turbine must respect every constraint.
 - **The interface.** The programming interface is tested for its locks: no token, another site's name or a path outside the project are refused.
+- **The setup program.** On a Windows build machine every test above is run by the Python and the packages inside the setup program; then the program is installed, the demo project runs through all six steps from the installed copy, the installed start is started, started twice and stopped, and the removal must leave nothing behind.
 - **Real masts, privately.** A private corpus of real masts is re-run on Bohemian's own computers after changes: step 1 against accepted results value by value, steps 2 to 6 against earlier independent calculations where they exist. The data and the results stay there. What those runs break is fixed here with a test built from invented data.
 
 ## Your data stays yours

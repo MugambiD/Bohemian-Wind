@@ -1,6 +1,6 @@
 # Third-party notices
 
-Bohemian Wind is Bohemian Renewables' own code under the MIT licence. It uses these open-source components, each under its own licence. No GPL-licensed code is part of the program.
+Bohemian Wind is Bohemian Renewables' own code under the MIT licence. It uses these open-source components, each under its own licence. Bohemian Wind's own code contains no GPL-licensed code. The Windows setup program passes on Python and the packages as their authors publish them; what is inside those, and under which licences, is set out under "The Windows setup program" below.
 
 ## Python packages (installed by `requirements.txt`)
 
@@ -22,6 +22,18 @@ Bohemian Wind is Bohemian Renewables' own code under the MIT licence. It uses th
 | Component | Licence | Where |
 |---|---|---|
 | Lato font (Łukasz Dziedzic), latin subset from Fontsource | SIL Open Font License 1.1 | `bohemian_wind/app/static/fonts/`, licence text in `OFL-Lato.txt` |
+
+## The Windows setup program
+
+The setup program (`packaging/windows/`, built by the build server) installs a private copy of Python (PSF licence, python.org's own signed build), the packages pinned in `packaging/windows/requirements.txt` at the versions that were tested together, and Bohemian Wind. Every one of them is passed on unchanged.
+
+- **Packages.** `packaging/windows/notices.json` lists each package with its licence: MIT, BSD, Apache 2.0, PSF-style, CC0 and, for certifi and part of tqdm, MPL 2.0. Each package's own licence files are copied into the folder `licenses\packages` of the installation, and `licenses\PACKAGES.txt` lists them.
+- **Libraries inside the packages.** Several packages carry compiled libraries (about 100 `.dll` files of 45 libraries). `notices.json` names each library, its licence and where its source is; the licence texts are in `packaging/windows/licenses/` and are installed into `licenses\libraries`, with the list in `licenses\LIBRARIES.txt`. Most are under MIT, BSD, Apache 2.0, zlib-style or public-domain terms.
+- **Three kinds ask more than keeping the notice.** (1) The GCC runtime library inside OpenBLAS, which numpy and scipy carry: GPL 3 or later with the GCC Runtime Library Exception, which allows passing it on as part of a program built with GCC. (2) GNU libiconv (in netCDF4 and rasterio) and GEOS (in rasterio): LGPL 2.1 or later; they are separate files, unchanged, and can be replaced by the user. (3) SpatiaLite and FreeXL (in rasterio): a choice of MPL 1.1, GPL 2 or later, or LGPL 2.1 or later, taken here under MPL 1.1. Their sources are at the addresses given in `notices.json`.
+- **The build stops** when the bundle holds a package or a library file that the list does not name, or a package that declares a GPL licence the list does not expect. Nothing is passed on unread.
+- **Inno Setup** (Jordan Russell and Martijn Laan, Inno Setup licence) makes the setup program; its small start-up and removal code is part of every setup program it makes.
+
+**[COMPLIANCE]** The same packages reach every user who starts from the source, fetched from PyPI by `pip`; the setup program differs in that Bohemian Renewables passes them on itself. Whoever publishes a setup program for others to download should have read this section and be content with it. This is a description of the licences, not legal advice.
 
 ## Windows build of the data checks (`BohemianWindQC.exe`, optional)
 

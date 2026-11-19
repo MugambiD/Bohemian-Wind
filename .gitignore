@@ -26,3 +26,4 @@ converted/
 site settings/
 test-corpus/
 *Bohemian Wind QC outputs*/
+*.egg-info/

@@ -1,0 +1,488 @@
+{
+  "about": "What the Windows installer passes on besides Bohemian Wind itself, and under which licence. build.py stops when the bundle holds a package or a library file that is not listed here, so nothing is passed on unread. 'text' names a file in the licenses folder beside this file; where it is missing, the licence text travels inside the package that carries the library (noted in 'where').",
+  "packages": {
+    "affine": "BSD-3-Clause",
+    "attrs": "MIT",
+    "autograd": "MIT",
+    "bohemian-wind": "MIT",
+    "certifi": "MPL-2.0",
+    "cftime": "MIT",
+    "charset-normalizer": "MIT",
+    "click": "BSD-3-Clause",
+    "cloudpickle": "BSD-3-Clause",
+    "colorama": "BSD-3-Clause",
+    "contourpy": "BSD-3-Clause",
+    "cycler": "BSD-3-Clause",
+    "et-xmlfile": "MIT",
+    "fonttools": "MIT",
+    "git-lfs": "CC0-1.0",
+    "h5netcdf": "BSD-3-Clause",
+    "h5py": "BSD-3-Clause",
+    "idna": "BSD-3-Clause",
+    "joblib": "BSD-3-Clause",
+    "kiwisolver": "BSD-3-Clause",
+    "matplotlib": "Matplotlib licence (based on the PSF licence); fonts and other parts under their own licences, in the package",
+    "netcdf4": "MIT",
+    "numpy": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0; libraries inside: see OpenBLAS",
+    "openpyxl": "MIT",
+    "packaging": "Apache-2.0 OR BSD-2-Clause",
+    "pandas": "BSD-3-Clause",
+    "pillow": "MIT-CMU; libraries built in under their own licences, listed in the package's LICENSE",
+    "platformdirs": "MIT",
+    "pooch": "BSD-3-Clause",
+    "py-wake": "MIT",
+    "pyparsing": "MIT",
+    "python-dateutil": "Apache-2.0 OR BSD-3-Clause",
+    "pyyaml": "MIT",
+    "rasterio": "BSD-3-Clause",
+    "requests": "Apache-2.0",
+    "scipy": "BSD-3-Clause; libraries inside: see OpenBLAS",
+    "tqdm": "MPL-2.0 AND MIT",
+    "tzdata": "Apache-2.0",
+    "urllib3": "MIT",
+    "xarray": "Apache-2.0"
+  },
+  "libraries": [
+    {
+      "name": "Python",
+      "licence": "PSF-2.0",
+      "source": "https://www.python.org",
+      "files": [
+        "python3*.dll"
+      ],
+      "where": "licenses/Python-LICENSE.txt, which also covers the libraries python.org builds into Python for Windows"
+    },
+    {
+      "name": "Microsoft Visual C++ runtime",
+      "licence": "Microsoft Software License Terms (redistributable files of Visual Studio)",
+      "source": "https://visualstudio.microsoft.com/license-terms/",
+      "files": [
+        "vcruntime140*.dll",
+        "msvcp140*.dll",
+        "concrt140*.dll",
+        "vcomp140*.dll"
+      ],
+      "where": "passed on unchanged with Python and with numpy, pandas and rasterio"
+    },
+    {
+      "name": "OpenSSL",
+      "licence": "Apache-2.0",
+      "source": "https://www.openssl.org",
+      "files": [
+        "libcrypto-3*.dll",
+        "libssl-3*.dll"
+      ],
+      "text": "OpenSSL.txt"
+    },
+    {
+      "name": "libffi",
+      "licence": "MIT",
+      "source": "https://github.com/libffi/libffi",
+      "files": [
+        "libffi-*.dll"
+      ],
+      "where": "licenses/Python-LICENSE.txt"
+    },
+    {
+      "name": "SQLite",
+      "licence": "blessing (public domain)",
+      "source": "https://www.sqlite.org",
+      "files": [
+        "sqlite3.dll"
+      ],
+      "text": "SQLite.txt"
+    },
+    {
+      "name": "Tcl/Tk",
+      "licence": "TCL",
+      "source": "https://www.tcl-lang.org",
+      "files": [
+        "tcl8*.dll",
+        "tk8*.dll",
+        "tcl9*.dll",
+        "tk9*.dll",
+        "tcldde*.dll",
+        "tclreg*.dll"
+      ],
+      "where": "licenses/Python-LICENSE.txt and python/tcl/*/license.terms"
+    },
+    {
+      "name": "zlib",
+      "licence": "Zlib",
+      "source": "https://zlib.net",
+      "files": [
+        "zlib1.dll",
+        "zlib.dll",
+        "z.dll"
+      ],
+      "text": "zlib.txt"
+    },
+    {
+      "name": "mpdecimal",
+      "licence": "BSD-2-Clause",
+      "source": "https://www.bytereef.org/mpdecimal/",
+      "files": [
+        "libmpdec*.dll"
+      ],
+      "where": "licenses/Python-LICENSE.txt"
+    },
+    {
+      "name": "OpenBLAS, with LAPACK and the GCC runtime library",
+      "licence": "BSD-3-Clause (OpenBLAS), BSD-3-Clause-Open-MPI (LAPACK), GPL-3.0-or-later WITH GCC-exception-3.1 (GCC runtime library)",
+      "source": "https://github.com/OpenMathLib/OpenBLAS",
+      "files": [
+        "libscipy_openblas*.dll"
+      ],
+      "where": "LICENSE.txt of numpy and of scipy (licenses/packages), with the full texts"
+    },
+    {
+      "name": "HDF5",
+      "licence": "BSD-3-Clause",
+      "source": "https://github.com/HDFGroup/hdf5",
+      "files": [
+        "hdf5.dll",
+        "hdf5_hl.dll"
+      ],
+      "text": "HDF5.txt"
+    },
+    {
+      "name": "HDF4",
+      "licence": "BSD-3-Clause (HDF4 terms)",
+      "source": "https://github.com/HDFGroup/hdf4",
+      "files": [
+        "hdf.dll",
+        "mfhdf.dll",
+        "xdr.dll"
+      ],
+      "text": "HDF4.txt"
+    },
+    {
+      "name": "netCDF-C",
+      "licence": "BSD-3-Clause",
+      "source": "https://github.com/Unidata/netcdf-c",
+      "files": [
+        "netcdf.dll",
+        "__nc*.dll"
+      ],
+      "text": "netCDF-C.txt"
+    },
+    {
+      "name": "AWS Common Runtime",
+      "licence": "Apache-2.0",
+      "source": "https://github.com/awslabs/aws-c-common",
+      "files": [
+        "aws-c-*.dll",
+        "aws-checksums.dll"
+      ],
+      "text": "AWS-Common-Runtime.txt"
+    },
+    {
+      "name": "C-Blosc",
+      "licence": "BSD-3-Clause",
+      "source": "https://github.com/Blosc/c-blosc",
+      "files": [
+        "blosc.dll"
+      ],
+      "text": "C-Blosc.txt"
+    },
+    {
+      "name": "GNU libiconv",
+      "licence": "LGPL-2.1-or-later",
+      "source": "https://www.gnu.org/software/libiconv/",
+      "files": [
+        "iconv.dll",
+        "iconv-*.dll",
+        "charset.dll"
+      ],
+      "text": "GNU-libiconv.txt"
+    },
+    {
+      "name": "ICU",
+      "licence": "Unicode-3.0",
+      "source": "https://github.com/unicode-org/icu",
+      "files": [
+        "icudt*.dll",
+        "icuuc*.dll",
+        "icuin*.dll"
+      ],
+      "text": "ICU.txt"
+    },
+    {
+      "name": "libjpeg-turbo",
+      "licence": "IJG AND BSD-3-Clause AND Zlib",
+      "source": "https://github.com/libjpeg-turbo/libjpeg-turbo",
+      "files": [
+        "jpeg62.dll",
+        "jpeg8.dll"
+      ],
+      "text": "libjpeg-turbo.txt"
+    },
+    {
+      "name": "bzip2",
+      "licence": "bzip2-1.0.6",
+      "source": "https://sourceware.org/bzip2/",
+      "files": [
+        "libbz2.dll",
+        "bz2.dll"
+      ],
+      "text": "bzip2.txt"
+    },
+    {
+      "name": "curl",
+      "licence": "curl",
+      "source": "https://curl.se",
+      "files": [
+        "libcurl.dll"
+      ],
+      "text": "curl.txt"
+    },
+    {
+      "name": "libssh2",
+      "licence": "BSD-3-Clause",
+      "source": "https://github.com/libssh2/libssh2",
+      "files": [
+        "libssh2.dll"
+      ],
+      "text": "libssh2.txt"
+    },
+    {
+      "name": "libxml2",
+      "licence": "MIT",
+      "source": "https://gitlab.gnome.org/GNOME/libxml2",
+      "files": [
+        "libxml2.dll"
+      ],
+      "text": "libxml2.txt"
+    },
+    {
+      "name": "LZ4",
+      "licence": "BSD-2-Clause",
+      "source": "https://github.com/lz4/lz4",
+      "files": [
+        "lz4.dll"
+      ],
+      "text": "LZ4.txt"
+    },
+    {
+      "name": "libpsl",
+      "licence": "MIT",
+      "source": "https://github.com/rockdaboot/libpsl",
+      "files": [
+        "psl-*.dll"
+      ],
+      "text": "libpsl.txt"
+    },
+    {
+      "name": "libaec (as szip)",
+      "licence": "BSD-2-Clause",
+      "source": "https://gitlab.dkrz.de/k202009/libaec",
+      "files": [
+        "szip.dll",
+        "aec.dll"
+      ],
+      "text": "libaec.txt"
+    },
+    {
+      "name": "libzip",
+      "licence": "BSD-3-Clause",
+      "source": "https://github.com/nih-at/libzip",
+      "files": [
+        "zip.dll"
+      ],
+      "text": "libzip.txt"
+    },
+    {
+      "name": "Zstandard",
+      "licence": "BSD-3-Clause",
+      "source": "https://github.com/facebook/zstd",
+      "files": [
+        "zstd.dll"
+      ],
+      "text": "Zstandard.txt"
+    },
+    {
+      "name": "GDAL",
+      "licence": "MIT, with parts under other permissive licences",
+      "source": "https://gdal.org",
+      "files": [
+        "gdal.dll"
+      ],
+      "text": "GDAL.txt"
+    },
+    {
+      "name": "GEOS",
+      "licence": "LGPL-2.1-or-later",
+      "source": "https://libgeos.org",
+      "files": [
+        "geos.dll",
+        "geos_c.dll"
+      ],
+      "text": "GEOS.txt"
+    },
+    {
+      "name": "PROJ",
+      "licence": "MIT",
+      "source": "https://proj.org",
+      "files": [
+        "proj_*.dll",
+        "proj.dll"
+      ],
+      "text": "PROJ.txt"
+    },
+    {
+      "name": "libgeotiff",
+      "licence": "MIT, with public-domain parts",
+      "source": "https://github.com/OSGeo/libgeotiff",
+      "files": [
+        "geotiff.dll"
+      ],
+      "text": "libgeotiff.txt"
+    },
+    {
+      "name": "giflib",
+      "licence": "MIT",
+      "source": "https://giflib.sourceforge.net",
+      "files": [
+        "gif.dll"
+      ],
+      "text": "giflib.txt"
+    },
+    {
+      "name": "json-c",
+      "licence": "MIT",
+      "source": "https://github.com/json-c/json-c",
+      "files": [
+        "json-c.dll"
+      ],
+      "text": "json-c.txt"
+    },
+    {
+      "name": "Expat",
+      "licence": "MIT",
+      "source": "https://github.com/libexpat/libexpat",
+      "files": [
+        "libexpat.dll"
+      ],
+      "text": "Expat.txt"
+    },
+    {
+      "name": "XZ Utils (liblzma)",
+      "licence": "0BSD",
+      "source": "https://tukaani.org/xz/",
+      "files": [
+        "liblzma.dll"
+      ],
+      "text": "XZ-Utils.txt"
+    },
+    {
+      "name": "libpng",
+      "licence": "libpng-2.0",
+      "source": "http://www.libpng.org",
+      "files": [
+        "libpng16.dll"
+      ],
+      "text": "libpng.txt"
+    },
+    {
+      "name": "PostgreSQL client library",
+      "licence": "PostgreSQL",
+      "source": "https://www.postgresql.org",
+      "files": [
+        "libpq.dll"
+      ],
+      "text": "PostgreSQL.txt"
+    },
+    {
+      "name": "WebP",
+      "licence": "BSD-3-Clause",
+      "source": "https://github.com/webmproject/libwebp",
+      "files": [
+        "libwebp.dll",
+        "libsharpyuv.dll"
+      ],
+      "text": "WebP.txt"
+    },
+    {
+      "name": "LERC",
+      "licence": "Apache-2.0",
+      "source": "https://github.com/Esri/lerc",
+      "files": [
+        "Lerc.dll"
+      ],
+      "text": "LERC.txt"
+    },
+    {
+      "name": "MiniZip",
+      "licence": "Zlib",
+      "source": "https://zlib.net",
+      "files": [
+        "minizip.dll"
+      ],
+      "text": "MiniZip.txt"
+    },
+    {
+      "name": "OpenJPEG",
+      "licence": "BSD-2-Clause",
+      "source": "https://github.com/uclouvain/openjpeg",
+      "files": [
+        "openjp2.dll"
+      ],
+      "text": "OpenJPEG.txt"
+    },
+    {
+      "name": "PCRE2",
+      "licence": "BSD-3-Clause WITH PCRE2-exception",
+      "source": "https://github.com/PCRE2Project/pcre2",
+      "files": [
+        "pcre2-*.dll"
+      ],
+      "text": "PCRE2.txt"
+    },
+    {
+      "name": "Qhull",
+      "licence": "Qhull",
+      "source": "http://www.qhull.org",
+      "files": [
+        "qhull_r.dll"
+      ],
+      "text": "Qhull.txt"
+    },
+    {
+      "name": "SpatiaLite",
+      "licence": "MPL-1.1 OR GPL-2.0-or-later OR LGPL-2.1-or-later; passed on under MPL-1.1",
+      "source": "https://www.gaia-gis.it/fossil/libspatialite",
+      "files": [
+        "spatialite.dll"
+      ],
+      "text": "SpatiaLite.txt"
+    },
+    {
+      "name": "FreeXL",
+      "licence": "MPL-1.1 OR GPL-2.0-or-later OR LGPL-2.1-or-later; passed on under MPL-1.1",
+      "source": "https://www.gaia-gis.it/fossil/freexl",
+      "files": [
+        "freexl-*.dll"
+      ],
+      "text": "FreeXL.txt"
+    },
+    {
+      "name": "LibTIFF",
+      "licence": "libtiff",
+      "source": "https://libtiff.gitlab.io/libtiff/",
+      "files": [
+        "tiff.dll"
+      ],
+      "text": "LibTIFF.txt"
+    },
+    {
+      "name": "TinyXML-2",
+      "licence": "Zlib",
+      "source": "https://github.com/leethomason/tinyxml2",
+      "files": [
+        "tinyxml2.dll"
+      ],
+      "text": "TinyXML-2.txt"
+    }
+  ],
+  "copyleft": "Three kinds of library here are under a licence that asks more than keeping the notice. (1) The GCC runtime library inside OpenBLAS (numpy, scipy): GPL 3 or later with the GCC Runtime Library Exception, which allows passing it on as part of a program built with GCC. (2) GNU libiconv (netCDF4, rasterio) and GEOS (rasterio): LGPL 2.1 or later; they are separate files, unchanged, and can be replaced by the user. (3) SpatiaLite and FreeXL (rasterio): a choice of three licences, taken here under the Mozilla Public License 1.1. The source of each is at the address given. Bohemian Wind's own code contains none of them and stays under the MIT licence."
+}

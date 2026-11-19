@@ -1,0 +1,74 @@
+name: windows installer
+# Builds the Windows setup program, and offers it only after the build machine has (1) run every test with the
+# Python and the packages that are inside it, (2) installed it, (3) run the demo project and the installed start
+# from the installed copy, and (4) removed it again without leaving anything behind.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  installer:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Plain git rather than actions/checkout: it puts the code in a folder named after the repository, and a
+      # Windows runner cannot make a folder whose name ends in a dot.
+      - name: Check out
+        working-directory: 'D:\'
+        run: |
+          git init -q src
+          cd src
+          git remote add origin "https://github.com/${{ github.repository }}"
+          git fetch -q --depth 1 origin "${{ github.sha }}"
+          git checkout -q FETCH_HEAD
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y }
+          if (-not (Test-Path $iscc)) { throw 'Inno Setup 6 is not there after the installation.' }
+          Write-Host "Inno Setup: $iscc"
+      - name: The bundle (Python, packages, the application, every licence)
+        working-directory: 'D:\src'
+        run: python packaging/windows/build.py bundle --work 'D:\bw-build' --commit "${{ github.sha }}"
+      # The same file, from the same place and checked the same way, as in tests.yml.
+      - name: Mast data for the synthetic-mast tests
+        working-directory: 'D:\'
+        run: |
+          pip download --no-deps --only-binary=:all: brightwind==2.7.0 -d fixture
+          python -c "import hashlib, pathlib, zipfile; d = pathlib.Path('fixture'); z = zipfile.ZipFile(next(d.glob('brightwind-2.7.0-*.whl'))); raw = z.read(next(n for n in z.namelist() if n.endswith('/demo_data.csv'))); assert hashlib.sha256(raw).hexdigest() == 'd6e578c23e0244600aa3151eda8d55fd132135f3f69e0467abbba057c4779529', 'demo_data.csv is not the file the tests were written for'; (d / 'demo_data.csv').write_bytes(raw)"
+      - name: Every test, run by the bundle's own Python
+        working-directory: 'D:\src'
+        env:
+          BW_DEMO_CSV: 'D:\fixture\demo_data.csv'
+        run: python packaging/windows/check.py tests 'D:\bw-build'
+      - name: The setup program
+        working-directory: 'D:\src'
+        run: python packaging/windows/build.py installer --work 'D:\bw-build' --out 'D:\bw-dist'
+      - name: Install it, use it, remove it
+        working-directory: 'D:\src'
+        run: python packaging/windows/check.py installer 'D:\bw-dist'
+      - name: What was built
+        if: always()
+        working-directory: 'D:\'
+        run: |
+          ls -la bw-dist || true
+          cat bw-dist/BUILD.txt || true
+          tail -n 40 bw-dist/install.log || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BohemianWind-Setup
+          path: |
+            D:\bw-dist\BohemianWind-*-Setup.exe
+            D:\bw-dist\BohemianWind-*-Setup.exe.sha256
+            D:\bw-dist\BUILD.txt
+            D:\bw-dist\PACKAGES.txt
+            D:\bw-dist\LIBRARIES.txt
+          if-no-files-found: error
+          retention-days: 90

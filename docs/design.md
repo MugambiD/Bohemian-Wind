@@ -24,10 +24,10 @@ Dark green plane, one signal green for actions and finished steps, Bohemian teal
 
 | Step | Next |
 |---|---|
-| 1 Mast data | NRG Symphonie text and WindPRO export readers; calibration review; mast-shadow correction |
+| 1 Mast data | Calibration review; mast-shadow correction; a reader for NRG Symphonie raw files |
 | 2 Long-term | ERA5 and MERRA-2 hourly references; more than one method; uncertainty from the correlation |
 | 3 Flow | Real-terrain tests of the linear model (Askervein, two-mast cross-prediction); roughness-change model; a second engine for steep terrain |
 | 4 Layout and energy | A turbine library of public generic classes; a true optimiser (TOPFARM); curtailment |
 | 5 Environment | Octave-band noise; realistic flicker with cloud statistics; a zone-of-visibility map |
 | 6 Permitting | Country checklists written with local counsel |
-| App | A Windows installer with Python inside; a hosted version for teams |
+| App | A signed setup program for Windows (it exists, unsigned: [windows-installer.md](windows-installer.md)); setup programs for macOS and Linux; a hosted version for teams |
