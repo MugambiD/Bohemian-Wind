@@ -45,6 +45,9 @@ KAPPA, CMU = 0.41, 0.09
 U_REF, Z_REF = 10.0, 100.0         # the inflow's speed at its reference height: ratios do not depend on it
 STABILITY_ITERATIONS = 100     # results are written this often; the last two are compared
 STABLE_PCT = 0.5               # the speeds round hub height moved less than this over the last STABILITY_ITERATIONS
+PROGRESS_EVERY_S = 300.0       # how often a long run says where it is
+MIN_ITERATIONS = 500           # a run that is steady after this many iterations ends there ...
+EARLY_STOP_PCT = 0.2           # ... when the wind round hub height moved less than this over the last STABILITY_ITERATIONS
 HEIGHTS = (10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 180, 200, 250)
 VERSION = 1                        # of what a stored CFD result holds
 CREDIT = ("CFD: OpenFOAM, free software from OpenCFD Ltd under the GNU General Public License v3 (source code at "
@@ -426,14 +429,30 @@ def write_fields(case: Path, mesh: Mesh, s: Settings, of: dict | None = None) ->
 
 # ---------------------------------------------------------------- running
 
-def _run(of: dict, case: Path, args: list, logname: str, timeout: float | None = None, stop=None) -> str:
+def _last_iteration(log: Path) -> int | None:
+    """The iteration a running solver has reached, from the end of its log."""
+    try:
+        with open(log, "rb") as fh:
+            fh.seek(0, 2)
+            fh.seek(max(0, fh.tell() - 8192))
+            tail = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return None
+    hits = re.findall(r"\nTime = (\d+)", tail)
+    return int(hits[-1]) if hits else None
+
+
+def _run(of: dict, case: Path, args: list, logname: str, timeout: float | None = None, stop=None, on_progress=None,
+         check=None) -> str:
+    """Runs one OpenFOAM program. check: called every half second while it runs; when it returns True the program
+    is ended there (its last complete result is used) and no error is raised."""
     exe = Path(of["bin"]) / (args[0] + (".exe" if os.name == "nt" else ""))
     cmd = [str(exe) if exe.is_file() else args[0]] + args[1:] + ["-case", str(case)]
     flags = 0x08000000 if os.name == "nt" else 0               # CREATE_NO_WINDOW: no console flashing on Windows
     log = Path(case) / logname
     with open(log, "w", encoding="utf-8", errors="replace") as fh:
         p = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT, env=of["env"], cwd=str(case), creationflags=flags)
-        t0 = time.time()
+        t0 = last = time.time()
         while p.poll() is None:
             if stop is not None and stop():
                 p.kill()
@@ -441,6 +460,15 @@ def _run(of: dict, case: Path, args: list, logname: str, timeout: float | None =
             if timeout and time.time() - t0 > timeout:
                 p.kill()
                 raise CfdError(f"{args[0]} took longer than {timeout / 3600:.1f} hours")
+            if on_progress is not None and time.time() - last > 30.0:
+                last = time.time()
+                n = _last_iteration(log)
+                if n is not None:
+                    on_progress(n)
+            if check is not None and check():
+                p.kill()
+                p.wait()
+                return log.read_text(encoding="utf-8", errors="replace")
             time.sleep(0.5)
     text = log.read_text(encoding="utf-8", errors="replace")
     if p.returncode != 0 or "FOAM FATAL" in text:
@@ -460,7 +488,7 @@ def residuals(log_text: str) -> dict:
 
 
 def run_sector(case: Path, grid: Grid, direction_deg: float, core_half: float, s: Settings, of: dict,
-               heights=HEIGHTS, stop=None) -> dict:
+               heights=HEIGHTS, stop=None, on_progress=None) -> dict:
     """Mesh, solve and read one sector. Returns the speeds at `heights` above ground on the turned frame's
     column centres, and how the solution went."""
     case = Path(case)
@@ -471,15 +499,10 @@ def run_sector(case: Path, grid: Grid, direction_deg: float, core_half: float, s
     _run(of, case, ["blockMesh"], "log.blockMesh", 3600, stop)
     write_points(case, mesh)
     write_fields(case, mesh, s, of)
-    t0 = time.time()
-    text = _run(of, case, ["simpleFoam"], "log.simpleFoam", 48 * 3600, stop)
-    info = residuals(text)
-    info["seconds"] = round(time.time() - t0, 1)
-    times = sorted((float(p.name), p) for p in case.iterdir() if p.is_dir() and re.fullmatch(r"\d+(\.\d+)?", p.name) and p.name != "0")
-    if not times:
-        raise CfdError("simpleFoam wrote no result")
     nk, nj, ni = mesh.shape
     hag = cell_heights(mesh)
+    core = (np.abs(0.5 * (mesh.xs[1:] + mesh.xs[:-1]))[None, :] <= core_half) & (np.abs(0.5 * (mesh.ys[1:] + mesh.ys[:-1]))[:, None] <= core_half)
+    hub = [i for i, h in enumerate(heights) if 60 <= h <= 160] or list(range(len(heights)))
 
     def column_speeds(tdir) -> np.ndarray:
         U, _ = _read_list(tdir / "U", "vector")
@@ -490,17 +513,57 @@ def run_sector(case: Path, grid: Grid, direction_deg: float, core_half: float, s
                 out[:, j, i] = np.interp(heights, hag[:, j, i], speed[:, j, i])
         return out
 
-    out = column_speeds(times[-1][1])
-    # how much the wind round hub height still moved over the last stretch of iterations, over the map area
-    core = (np.abs(0.5 * (mesh.xs[1:] + mesh.xs[:-1]))[None, :] <= core_half) & (np.abs(0.5 * (mesh.ys[1:] + mesh.ys[:-1]))[:, None] <= core_half)
-    hub = [i for i, h in enumerate(heights) if 60 <= h <= 160] or list(range(len(heights)))
-    if len(times) > 1 and times[-1][0] > times[-2][0]:
-        prev = column_speeds(times[-2][1])
-        moved = np.abs(out[hub] / prev[hub] - 1.0)[:, core]
-        info["moved_pct"] = round(100.0 * float(np.percentile(moved, 99)), 3)
-        info["moved_over"] = int(times[-1][0] - times[-2][0])
+    def time_dirs() -> list:
+        return sorted((float(p.name), p) for p in case.iterdir() if p.is_dir() and re.fullmatch(r"\d+(\.\d+)?", p.name) and p.name != "0")
+
+    def moved(a, b) -> float:
+        """How much the wind round hub height changed between two results, over the map area (99th percentile, %)."""
+        return 100.0 * float(np.percentile(np.abs(a[hub] / b[hub] - 1.0)[:, core], 99))
+
+    seen = {"at": None, "speeds": None, "prev_at": None, "moved": None, "early": False}
+
+    def steady_now() -> bool:
+        """After each write (every STABILITY_ITERATIONS): compare with the one before; steady enough after
+        MIN_ITERATIONS ends the run. Steep ground seldom meets the residual targets, but its wind settles."""
+        ts = time_dirs()
+        if not ts or ts[-1][0] == seen["at"]:
+            return False
+        t, tdir = ts[-1]
+        it = _last_iteration(case / "log.simpleFoam")
+        if it is None or it <= t:                       # the solver may still be writing this result
+            return False
+        try:
+            sp = column_speeds(tdir)
+        except (CfdError, OSError, ValueError):
+            return False
+        if seen["speeds"] is not None:
+            seen["moved"], seen["prev_at"] = moved(sp, seen["speeds"]), seen["at"]
+        seen["at"], seen["speeds"] = t, sp
+        if seen["moved"] is not None and t >= MIN_ITERATIONS and seen["moved"] < EARLY_STOP_PCT:
+            seen["early"] = True
+            return True
+        return False
+
+    t0 = time.time()
+    text = _run(of, case, ["simpleFoam"], "log.simpleFoam", 48 * 3600, stop, on_progress, steady_now)
+    info = residuals(text)
+    info["seconds"] = round(time.time() - t0, 1)
+    if seen["early"]:
+        out = seen["speeds"]
+        info["iterations"] = int(seen["at"])
+        info["moved_pct"], info["moved_over"] = round(seen["moved"], 3), int(seen["at"] - seen["prev_at"])
+        info["stopped_steady"] = True
     else:
-        info["moved_pct"], info["moved_over"] = None, 0
+        times = time_dirs()
+        if not times:
+            raise CfdError("simpleFoam wrote no result")
+        out = column_speeds(times[-1][1])
+        if len(times) > 1 and times[-1][0] > times[-2][0]:
+            info["moved_pct"] = round(moved(out, column_speeds(times[-2][1])), 3)
+            info["moved_over"] = int(times[-1][0] - times[-2][0])
+        else:
+            info["moved_pct"], info["moved_over"] = None, 0
+        info["stopped_steady"] = False
     info["stable"] = bool(info["converged"] or (info["moved_pct"] is not None and info["moved_pct"] < STABLE_PCT))
     info.update({"direction_deg": float(direction_deg), "cells": int(nk * nj * ni), "shape": [nk, nj, ni]})
     return {"speeds": out, "xc": 0.5 * (mesh.xs[1:] + mesh.xs[:-1]), "yc": 0.5 * (mesh.ys[1:] + mesh.ys[:-1]),
@@ -556,16 +619,20 @@ def work_folder() -> Path:
     raise CfdError("No folder without spaces in its path could be made for the CFD cases.")
 
 
+MACHINE_US_16 = 3.1               # microseconds per cell and iteration for a whole 16-thread laptop running sectors side by side
+                                  # (measured: 12 sectors of 288,120 cells, 1,200 iterations, 3.5 hours, OpenFOAM's Windows build)
+
+
 def estimate(core_half: float, s: Settings, sectors: int) -> dict:
-    """Cells per sector and a rough run time (about 4 microseconds per cell and iteration on one laptop core, and
-    up to the iteration limit, as steep ground rarely converges sooner)."""
+    """Cells per sector and the run time: likely (most sectors settle after about 60 % of the iteration limit) and
+    at most. The computer's throughput is taken from a measured run and scaled by its processors."""
     buffer = s.buffer_m if s.buffer_m is not None else max(3000.0, 0.4 * core_half)
     n = len(axis_nodes(core_half, s.cell_m, core_half + buffer, s.growth, s.max_cell_m)) - 1
     cells = n * n * s.layers
     workers = s.workers or max(1, min((os.cpu_count() or 2) - 1, int(0.6 * memory_gb() / max(0.3, 1.3 * cells / 1e6))))
-    per = cells * 4e-6 * s.iterations
-    return {"cells_per_sector": cells, "workers": workers,
-            "hours": round(per * math.ceil(sectors / workers) / 3600.0, 1)}
+    us = MACHINE_US_16 * 16.0 / max(2, os.cpu_count() or 2) * 1e-6
+    full = cells * sectors * s.iterations * us / 3600.0
+    return {"cells_per_sector": cells, "workers": workers, "hours": round(0.6 * full, 1), "hours_at_most": round(full, 1)}
 
 
 def run(grid: Grid, centres, out_dir, core_half: float, s: Settings | None = None, heights=HEIGHTS, log=print,
@@ -583,7 +650,7 @@ def run(grid: Grid, centres, out_dir, core_half: float, s: Settings | None = Non
     centres = [float(c) for c in centres]
     est = estimate(core_half, s, len(centres))
     log(f"CFD: {len(centres)} wind directions, {est['cells_per_sector']:,} cells each, {est['workers']} at a time; "
-        f"roughly {est['hours']:g} hours.")
+        f"likely about {est['hours']:g} hours, at most {est['hours_at_most']:g}.")
     ry, rx = grid.crop_slices(core_half)
     cg = grid.crop(core_half)
     speeds = np.empty((len(centres), len(heights)) + cg.shape)
@@ -595,10 +662,34 @@ def run(grid: Grid, centres, out_dir, core_half: float, s: Settings | None = Non
     def halted() -> bool:
         return abort.is_set() or bool(stop and stop())
 
+    reached = {}                                       # sector -> iteration reached, for the progress lines
+    finished = set()
+
     def one(i):
         return i, run_sector(work / f"sector_{i:02d}_{int(round(centres[i])) % 360:03d}", grid, centres[i], core_half, s, of,
-                             heights, halted)
+                             heights, halted, lambda n, i=i: reached.__setitem__(i, n))
 
+    def report():
+        """Every few minutes while the sectors run: where they are, and the time left at the pace so far."""
+        import threading  # noqa: PLC0415
+        tick = threading.Event()
+        while not tick.wait(PROGRESS_EVERY_S):
+            if abort.is_set() or len(finished) == len(centres):
+                return
+            running = {i: n for i, n in reached.items() if i not in finished}
+            if not running:
+                continue
+            done_its = sum(min(n, s.iterations) for n in running.values()) + s.iterations * len(finished)
+            total_its = s.iterations * len(centres)
+            spent = time.time() - t0
+            left = spent * (total_its / max(done_its, 1) - 1.0)
+            lo, hi = min(running.values()), max(running.values())
+            log(f"CFD: {len(finished)} of {len(centres)} wind directions done; the {len(running)} running are at iteration "
+                f"{lo}" + (f" to {hi}" if hi != lo else "") + f" of at most {s.iterations}. At most about {max(left, 0) / 60:.0f} minutes "
+                "left at the pace so far; a direction ends sooner once its wind has settled.")
+
+    watcher = __import__("threading").Thread(target=report, daemon=True)
+    watcher.start()
     try:
         with cf.ThreadPoolExecutor(max_workers=est["workers"]) as pool:
             futs = [pool.submit(one, i) for i in range(len(centres))]
@@ -611,10 +702,11 @@ def run(grid: Grid, centres, out_dir, core_half: float, s: Settings | None = Non
                     raise
                 speeds[i] = to_grid(res, centres[i], cg)
                 infos[i] = res["info"]
+                finished.add(i)
                 done += 1
                 r = res["info"]
                 how = ("converged" if r["converged"] else
-                       f"steady: the wind round hub height moved under {STABLE_PCT:g} % over the last {r['moved_over']} iterations"
+                       f"settled: the wind round hub height moved {r['moved_pct']:.2f} % over the last {r['moved_over']} iterations"
                        if r["stable"] else f"not steady: the wind round hub height still moved {r['moved_pct']} % over the last "
                        f"{r['moved_over']} iterations")
                 log(f"CFD: wind from {centres[i]:.0f} deg done ({done} of {len(centres)}), {r['iterations']} iterations, {how}, "

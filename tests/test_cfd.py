@@ -122,3 +122,20 @@ def test_openfoam_over_flat_ground_keeps_the_wind_the_same_everywhere(tmp_path):
     assert np.nanmax(np.abs(r - 1.0)) < 0.03
     k = list(heights).index(80.0)
     assert 8.5 < float(np.nanmedian(speeds[0, k])) < 10.5            # the logarithmic inflow kept: about 9.7 m/s at 80 m
+
+
+@pytest.mark.skipif(not cfd.available(), reason="OpenFOAM is not installed here")
+def test_a_run_ends_once_its_wind_has_settled(tmp_path, monkeypatch):
+    monkeypatch.setattr(cfd, "STABILITY_ITERATIONS", 20)
+    monkeypatch.setattr(cfd, "MIN_ITERATIONS", 40)
+    g = tr.from_function(lambda x, y: 1000.0 + 0 * x, 0.0, 30.0, half_km=3, res=100)
+    s = cfd.Settings(cell_m=300.0, buffer_m=1500.0, layers=12, iterations=2000, workers=1)
+    of = cfd.find_openfoam()
+    res = cfd.run_sector(tmp_path / "case", g, 270.0, 1500.0, s, of)
+    info = res["info"]
+    assert info["stable"] and info["iterations"] < 2000
+    assert info["stopped_steady"] or info["converged"]
+    if info["stopped_steady"]:
+        # compared with the result written before, or an earlier one when a small case writes faster than it is checked
+        assert info["iterations"] >= 40 and info["moved_pct"] < cfd.EARLY_STOP_PCT and info["moved_over"] % 20 == 0 < info["moved_over"]
+    assert np.isfinite(res["speeds"]).all()
