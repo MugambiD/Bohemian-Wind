@@ -2,10 +2,20 @@ name: windows installer
 # Builds the Windows setup program, and offers it only after the build machine has (1) run every test with the
 # Python and the packages that are inside it, (2) installed it, (3) run the demo project and the installed start
 # from the installed copy, and (4) removed it again without leaving anything behind.
+# A tag v<version> publishes that build as a release, with its notes from CHANGELOG.md (packaging/release_notes.py);
+# a manual run with "publish" ticked does the same for the version on main and makes the tag.
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish this build as the release of the version in bohemian_wind/__init__.py
+        type: boolean
+        default: false
+permissions:
+  contents: read
 jobs:
   installer:
     runs-on: windows-latest
@@ -24,6 +34,15 @@ jobs:
           git remote add origin "https://github.com/${{ github.repository }}"
           git fetch -q --depth 1 origin "${{ github.sha }}"
           git checkout -q FETCH_HEAD
+      - name: The tag names this version
+        if: github.ref_type == 'tag'
+        working-directory: 'D:\src'
+        run: |
+          v=$(tr -d '\r' < bohemian_wind/__init__.py | sed -n 's/^__version__ = "\(.*\)"$/\1/p')
+          if [ "${{ github.ref_name }}" != "v$v" ]; then
+            echo "::error::The tag ${{ github.ref_name }} does not name the version in bohemian_wind/__init__.py (v$v)."
+            exit 1
+          fi
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
@@ -72,3 +91,43 @@ jobs:
             D:\bw-dist\LIBRARIES.txt
           if-no-files-found: error
           retention-days: 90
+
+  # Only for a tag, or a manual run with "publish": the tested setup program becomes a release (a pre-release while the
+  # version ends in -dev), with its checksum and the notes for that version.
+  release:
+    needs: installer
+    if: github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: BohemianWind-Setup
+          path: dist
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          v=$(python3 -c "import bohemian_wind; print(bohemian_wind.__version__)")
+          tag="v$v"
+          exe="dist/BohemianWind-$v-Setup.exe"
+          if named=$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha 2>/dev/null) && [ "$named" != "$GITHUB_SHA" ]; then
+            echo "::error::$tag already names commit $named, not this build's $GITHUB_SHA."
+            exit 1
+          fi
+          python3 packaging/release_notes.py "$v" dist "$GITHUB_SHA" > notes.md
+          pre=""
+          case "$v" in *-*) pre="--prerelease" ;; esac
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release upload "$tag" "$exe" "$exe.sha256" --clobber
+            gh release edit "$tag" --title "Bohemian Wind $v" --notes-file notes.md $pre
+          else
+            gh release create "$tag" "$exe" "$exe.sha256" --target "$GITHUB_SHA" --title "Bohemian Wind $v" \
+              --notes-file notes.md $pre
+          fi
+          gh release view "$tag" --json url,isPrerelease,assets --jq '{url, isPrerelease, assets: [.assets[] | .name]}'

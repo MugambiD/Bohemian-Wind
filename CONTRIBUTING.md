@@ -8,3 +8,12 @@
 6. **No manufacturer data.** Turbines are generic. Power, thrust and sound curves from a manufacturer never enter the repository.
 7. **No standard text.** Describe a standard's method in your own words; never paste its text.
 8. **Say what it does not do.** A new method ships with its limits, shown next to its result.
+
+Everyone taking part follows the [code of conduct](.github/CODE_OF_CONDUCT.md). Security problems are reported privately, as [SECURITY.md](.github/SECURITY.md) describes.
+
+## Releasing a version
+
+1. Set the new version in `bohemian_wind/__init__.py`, `CITATION.cff` (with `date-released`) and the status line of `README.md`.
+2. Move the lines under *Unreleased* in `CHANGELOG.md` into a section for the version, and add its link at the end. The tests check that all of these name the same version.
+3. Push to `main` and wait for both workflows to pass.
+4. Tag that commit and push the tag: `git tag v<version>` then `git push origin v<version>`. The build server builds, tests, installs and removes the setup program again, then publishes it with its checksum and notes. A version ending in `-dev` is published as a pre-release.

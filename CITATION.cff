@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use Bohemian Wind, please cite it as below."
+type: software
+title: "Bohemian Wind: from met mast data to a permitting pack"
+abstract: >-
+  Open-source software for wind project development: met mast data checks,
+  long-term correction against NASA POWER, wind maps (a linear flow model, the
+  Global Wind Atlas pattern, or CFD with OpenFOAM), turbine layout and energy
+  with PyWake, noise and shadow-flicker screening, and permitting packs.
+  Developer estimates only: not an accredited or bankable energy yield
+  assessment.
+authors:
+  - name: "Bohemian Renewables (Africa)"
+version: "0.2.6-dev"
+date-released: "2026-11-20"
+license: MIT
+repository-code: "https://github.com/MugambiD/bohemian-wind"
+url: "https://github.com/MugambiD/bohemian-wind"
+keywords:
+  - wind energy
+  - wind resource assessment
+  - met mast
+  - computational fluid dynamics
+  - energy yield
+  - shadow flicker
+  - Africa

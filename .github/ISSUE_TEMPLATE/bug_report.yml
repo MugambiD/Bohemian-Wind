@@ -1,0 +1,72 @@
+name: Something does not work
+description: A step stops, a result looks wrong, or the setup program misbehaves.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > [!WARNING]
+        > **[COMPLIANCE] Do not post data.** No mast data, logger files, time series, client or site names, coordinates, reports or screenshots of a client's project. Show the problem with the demo project (first screen, **Open the demo project**) or with invented values.
+
+        A security problem goes to the **Security** tab instead, where only the maintainers see it.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The setup program's name gives it.
+      placeholder: 0.2.6-dev
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How you run it
+      options:
+        - Windows setup program
+        - From the source on Windows
+        - From the source on macOS
+        - From the source on Linux
+    validations:
+      required: true
+  - type: dropdown
+    id: step
+    attributes:
+      label: Where it happens
+      options:
+        - 1. Mast data
+        - 2. Long-term correction
+        - 3. Wind map
+        - 4. Layout and energy
+        - 5. Noise and shadow flicker
+        - 6. Permitting pack
+        - Starting, installing or removing
+        - Elsewhere
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: again
+    attributes:
+      label: How to make it happen again
+      description: With the demo project or invented data, if you can.
+      placeholder: |
+        1. Open the demo project
+        2. ...
+  - type: textarea
+    id: log
+    attributes:
+      label: Working log or error message
+      description: Take out names, folder paths and figures that identify a client or a site before you paste.
+      render: text
+  - type: checkboxes
+    id: clean
+    attributes:
+      label: Before you send
+      options:
+        - label: Nothing in this report identifies a client, a site or its data.
+          required: true

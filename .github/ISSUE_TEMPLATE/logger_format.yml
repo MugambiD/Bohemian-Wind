@@ -1,0 +1,43 @@
+name: A logger format it does not read
+description: Ask for a reader for another logger or export format.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > [!WARNING]
+        > **[COMPLIANCE] Do not attach real data.** Describe the format. If you can, paste the header with the site name, serial numbers and coordinates replaced, and a few lines with invented numbers.
+  - type: input
+    id: logger
+    attributes:
+      label: Logger make and model
+      placeholder: e.g. Kintech EOL Zenith
+    validations:
+      required: true
+  - type: input
+    id: export
+    attributes:
+      label: The program that writes the file, and its version
+      placeholder: e.g. the logger's own software, its cloud portal, or an export from another program
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind of file
+      options:
+        - Text (CSV, TXT, DAT)
+        - Binary
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: sample
+    attributes:
+      label: The header and a few lines, with invented values
+      render: text
+  - type: checkboxes
+    id: clean
+    attributes:
+      label: Before you send
+      options:
+        - label: Site names, serial numbers and coordinates are replaced, and the numbers are invented.
+          required: true

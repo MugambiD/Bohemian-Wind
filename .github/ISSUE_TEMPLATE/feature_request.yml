@@ -1,0 +1,30 @@
+name: An idea or a missing method
+description: Something the software should do, or do differently.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        What is planned for each step is in [docs/design.md](https://github.com/MugambiD/bohemian-wind/blob/main/docs/design.md#roadmap). Out of scope by design: bankable or accredited assessments, turbine suitability and loads, and anything that rests on a manufacturer's own curves.
+  - type: textarea
+    id: need
+    attributes:
+      label: What you want to do, and the decision it helps
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: How you do it today
+  - type: textarea
+    id: sources
+    attributes:
+      label: Methods and sources
+      description: Open methods and papers. Describe a standard's method in your own words; never paste its text.
+  - type: checkboxes
+    id: clean
+    attributes:
+      label: Before you send
+      options:
+        - label: "[COMPLIANCE] No client data, site names or coordinates, and no manufacturer's power, thrust or sound curves."
+          required: true

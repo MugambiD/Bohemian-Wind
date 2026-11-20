@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security problem privately
+    url: https://github.com/MugambiD/bohemian-wind/security/advisories/new
+    about: Not in a public issue, please. Only the maintainers see a private report.
+  - name: How each step works, with its limits
+    url: https://github.com/MugambiD/bohemian-wind/blob/main/docs/workflow.md
+    about: Methods, defaults and limits of every step, before you report a result as wrong.

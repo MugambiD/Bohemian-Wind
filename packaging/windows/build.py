@@ -426,7 +426,7 @@ open-source packages under their own licences; all of them are in the folder "li
 and LIBRARIES.txt). The CFD wind map runs OpenFOAM, free software under the GNU General Public License v3, as
 separate programs: they, their licence and their complete source code are in the folder "openfoam" (README.txt).
 
-Source and help: https://github.com/MugambiD/bohemian-wind.
+Source and help: https://github.com/MugambiD/bohemian-wind
 """, encoding="utf-8", newline="\r\n")
 
 

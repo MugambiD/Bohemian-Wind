@@ -48,7 +48,7 @@ The setup program (`packaging/windows/`, built by the build server) installs a p
 
 ## Windows build of the data checks (`BohemianWindQC.exe`, optional)
 
-Built with PyInstaller (GPL-2.0 with the bootloader exception, which permits distributing the built program under any licence) and bundling Python (PSF License), Tcl/Tk (BSD-style) and the pinned packages in `requirements-exe.txt`.
+Built with PyInstaller (GPL-2.0 with the bootloader exception, which permits distributing the built program under any licence) and bundling Python (PSF License), Tcl/Tk (BSD-style) and the pinned packages in `packaging/qc-exe/requirements-exe.txt` (built by `packaging/qc-exe/build_exe.bat`).
 
 ## Not bundled
 

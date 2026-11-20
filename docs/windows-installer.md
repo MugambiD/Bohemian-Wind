@@ -63,6 +63,14 @@ for every change to `main`:
 
 Only then is the setup program kept, as the artifact *BohemianWind-Setup* of the run, with its SHA-256.
 
+**Releases.** When a version is tagged (`v` and the version in `bohemian_wind/__init__.py`, for example
+`v0.2.6-dev`), the same run goes on to publish that setup program and its `.sha256` file under
+[Releases](https://github.com/MugambiD/bohemian-wind/releases), as a pre-release while the version ends in `-dev`. The
+notes open with the compliance notice, take the version's part of `CHANGELOG.md`, and say how to check the download
+(`packaging/release_notes.py`). A tag that does not name the version in the code stops the run before anything is
+built. Without a tag, a manual run of *windows installer* with *publish* ticked does the same for the version on
+`main`.
+
 ## Build it yourself
 
 On 64-bit Windows with Python 3.14 from python.org (with tcl/tk, the default) and

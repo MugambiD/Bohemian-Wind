@@ -13,7 +13,7 @@
 #endif
 #define AppName "Bohemian Wind"
 #define AppPublisher "Bohemian Renewables"
-#define AppURL "https://github.com/MugambiD/bohemian-wind."
+#define AppURL "https://github.com/MugambiD/bohemian-wind"
 #define Start "-m bohemian_wind desktop"
 
 [Setup]
