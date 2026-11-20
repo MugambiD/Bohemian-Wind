@@ -20,6 +20,11 @@ Rules
   programs, each height is its own point. A point with less than 60 days of data, at a height no other sensor of
   its kind measures, is listed and checked but left out of the wind statistics.
 - Repeated records in overlapping files are merged; records that disagree are quarantined (as in v0.1.3).
+- Logger clock corrections given in the settings ("clock_corrections") move the records of a period by whole minutes
+  before the files are merged: [{"from": "2025-03-10 14:40", "to": "2025-04-02 09:10", "minutes": 60,
+  "program": "<logger program>", "note": "why"}]. From and to are the times as the logger wrote them; the program, when
+  given, limits the correction to records written by that logger program (TOA5 files name it on every record), which
+  tells apart two records the wrong clock gave the same time. A record moves once, by the first correction that takes it.
 - Site visits: logger program changes and part-interval records (under 95% of the full sample count), grouped
   when less than 24 h apart; records from 1 h before to 1 h after are flagged as maintenance.
 - The v0.1.3 checks and statistics run unchanged (bohemian_wind.qc.run_qc, bohemian_wind.analysis.analyse).
@@ -148,21 +153,77 @@ def read_toa5(path: Path):
     ts = pd.to_datetime(tcol, format="%Y-%m-%d %H:%M:%S", errors="coerce")
     if len(ts) and ts.isna().mean() > 0.5:
         ts = pd.to_datetime(tcol, errors="coerce")
+    row_prog = df["ProgName"].to_numpy() if "ProgName" in df.columns else None
     df = df.drop(columns=[c for c in ("RECORD", "ProgName") if c in df.columns])
     df = df.apply(pd.to_numeric, errors="coerce")
     df.index = pd.DatetimeIndex(ts, name="Timestamp")
-    df = df[df.index.notna()]
+    keep = df.index.notna()
+    df = df[keep]
     e = env + [""] * 8
     info = {"station": e[1], "model": e[2], "serial": e[3], "os": e[4], "program": e[5], "signature": e[6],
-            "table": e[7], "names": names, "units": dict(zip(names, units)), "bad_lines": bad}
+            "table": e[7], "names": names, "units": dict(zip(names, units)), "bad_lines": bad,
+            # the program that wrote each record (a file's header names the program running when it was written out)
+            "row_programs": row_prog[keep] if row_prog is not None else None}
     return info, df
 
 
-def load(folders: list, log=print, channels: dict | None = None) -> dict:
+def program_name(p) -> str:
+    """A logger program's name in one form, for comparing: 'CPU:MAST_v5.CR1X' and 'MAST_v5.CR1X' are one program."""
+    p = str(p or "").strip().strip('"').strip()
+    return p[4:].strip() if p.upper().startswith("CPU:") else p
+
+
+def clock_rules(raw) -> list:
+    """The clock corrections of the settings, checked: [{"from", "to" (Timestamps), "minutes", "program", "note"}]."""
+    out = []
+    for i, r in enumerate(raw or [], 1):
+        try:
+            a, b = pd.Timestamp(str(r["from"])), pd.Timestamp(str(r["to"]))
+            minutes = int(round(float(r["minutes"])))
+        except (KeyError, TypeError, ValueError) as e:
+            raise SystemExit(f"Clock correction {i} needs a from and a to time and the minutes to add ({e}).") from None
+        if b < a or not minutes:
+            raise SystemExit(f"Clock correction {i}: the 'to' time must not come before the 'from' time, and the minutes "
+                             "must not be 0.")
+        out.append({"from": a, "to": b, "minutes": minutes, "program": program_name(r.get("program")),
+                    "note": str(r.get("note") or "").strip()})
+    return out
+
+
+def apply_clock(df: pd.DataFrame, info: dict, rules: list, moved: list) -> pd.DataFrame:
+    """Move the records of one file that the clock rules take; moved[k] collects the times (as written) rule k moved."""
+    if not rules or df.empty:
+        return df
+    idx = df.index
+    shift = np.zeros(len(df), dtype="int64")
+    progs = info.get("row_programs")
+    if progs is None:
+        progs = np.array([info.get("program", "")] * len(df), dtype=object)
+    names = np.array([program_name(x).lower() for x in progs], dtype=object)
+    for k, r in enumerate(rules):
+        m = (idx >= r["from"]) & (idx <= r["to"]) & (shift == 0)
+        if r["program"]:
+            m &= names == r["program"].lower()
+        shift[m] = r["minutes"]
+        moved[k].update(idx[m].asi8.tolist())
+    if not shift.any():
+        return df
+    df = df.copy()
+    df.index = pd.DatetimeIndex(idx + pd.to_timedelta(shift, unit="min"), name=idx.name)
+    order = np.argsort(df.index.asi8, kind="stable")
+    if info.get("row_programs") is not None:
+        info["row_programs"] = np.asarray(info["row_programs"])[order]
+    return df.iloc[order]
+
+
+def load(folders: list, log=print, channels: dict | None = None, clock: list | None = None) -> dict:
     """folders: data folders (every *.dat under them, and every .txt or .csv that is one of the text exports read)
     or single files. A single file lets one mast be read from a folder that holds several (the run still stops if
     the files read carry more than one station).
-    channels: per-port settings for formats whose files do not carry them (Nomad2 heights, vane north offsets)."""
+    channels: per-port settings for formats whose files do not carry them (Nomad2 heights, vane north offsets).
+    clock: logger clock corrections (see the module notes), applied to each file before the files are merged."""
+    rules = clock_rules(clock)
+    moved = [set() for _ in rules]
     def wanted(p: Path) -> bool:
         suf = p.suffix.lower()
         return p.is_file() and (suf == ".dat" or (suf in (".txt", ".csv") and text_reader(p) is not None))
@@ -182,6 +243,7 @@ def load(folders: list, log=print, channels: dict | None = None) -> dict:
             continue
         if df.empty:
             continue
+        df = apply_clock(df, info, rules, moved)
         info.update(file=str(p), first=df.index[0], last=df.index[-1], records=len(df))
         df["_src"] = len(infos)
         infos.append(info)
@@ -209,10 +271,20 @@ def load(folders: list, log=print, channels: dict | None = None) -> dict:
     log(f"  {len(paths)} data files, {len(infos)} read, {len(errors)} unreadable; {len(data):,} records "
         f"{data.index[0]:%Y-%m-%d %H:%M} to {data.index[-1]:%Y-%m-%d %H:%M}; {removed:,} repeated records merged; "
         f"{len(conflict_times):,} conflicting timestamps quarantined.")
+    notes = list(dict.fromkeys(n for i in infos for n in i.get("notes", [])))
+    applied = []
+    for r, m in zip(rules, moved):
+        rec = {"from": f"{r['from']:%Y-%m-%d %H:%M}", "to": f"{r['to']:%Y-%m-%d %H:%M}", "minutes": r["minutes"],
+               "program": r["program"], "note": r["note"], "records": len(m)}
+        applied.append(rec)
+        span = f"{r['from']:%d %b %Y %H:%M} to {r['to']:%d %b %Y %H:%M}" + (f", program {r['program']}" if r["program"] else "")
+        notes.append(f"Logger clock corrected as set in the project: {len(m):,} records written {span} moved "
+                     f"{r['minutes']:+d} minutes" + (f" ({r['note']})." if r["note"] else ".") if m else
+                     f"The clock correction for {span} matched no record: check its times and program name.")
     return {"paths": paths, "infos": infos, "errors": errors, "programs": programs, "prog": prog, "source": source,
-            "format": formats[0], "notes": list(dict.fromkeys(n for i in infos for n in i.get("notes", []))),
+            "format": formats[0], "notes": notes,
             "data": data, "removed": removed, "conflict_times": conflict_times, "conflict_rows": conflict_rows,
-            "conflicts": conflicts}
+            "conflicts": conflicts, "clock": applied}
 
 
 def file_inventory(path: Path, files: list) -> dict:
@@ -751,7 +823,7 @@ def main(argv=None, log=None):
     if converted.exists() and converted.resolve() not in [f.resolve() for f in folders]:
         folders.append(converted)
     say("Reading logger files ...")
-    L = load(folders, log=say, channels=settings.get("channels"))
+    L = load(folders, log=say, channels=settings.get("channels"), clock=settings.get("clock_corrections"))
     say(f"  Format: {L['format']}.")
     for n in L["notes"]:
         say(f"  {n}")
@@ -788,7 +860,7 @@ def main(argv=None, log=None):
                  ipacks=[], channel_history=pd.DataFrame(), duplicates_removed=L["removed"], read_errors=L["errors"],
                  source_format=L["format"], source=L["source"], conflict_times=L["conflict_times"],
                  conflict_rows=L["conflict_rows"], conflicts=L["conflicts"],
-                 site_checks={"gps": pos}, site_logged=dict(site), settings=settings)
+                 site_checks={"gps": pos}, site_logged=dict(site), settings=settings, clock_corrections=L["clock"])
     ds.points = {"visits": windows, "excluded": [s.label for s, temp in pts if temp]}
     say("Fingerprinting input files ...")
     if raw.is_dir():

@@ -268,7 +268,7 @@
            ${fNum('site', 'elevation_m', 'Ground elevation, m', { placeholder: 'from the logger', help: 'Fill these in only to replace what the logger files say, or when they say nothing.' })}
            <div class="row2">${fNum('data', 'direction_offset_deg', 'Vane correction, degrees', { min: -360, max: 360 })}${fNum('data', 'shear_alpha', 'Shear exponent to use', { min: -0.2, max: 0.8, placeholder: 'measured' })}</div>
            <p class="hint">The vane correction is added to every wind direction from the wind map onwards, for a vane mounted off north. Leave the shear exponent empty to use the measured one.</p></details>`
-        + channelsEditor());
+        + channelsEditor() + clockEditor());
     },
     longterm() {
       const src = S.project.longterm.source;
@@ -341,6 +341,18 @@
         <div class="field"><label for="ch-h${i}">Height, m</label><input id="ch-h${i}" type="number" step="any" min="0" data-ch="height" value="${ok(r[1]) ? r[1] : ''}"></div>
         <div class="field"><label for="ch-o${i}">Vane offset, °</label><input id="ch-o${i}" type="number" step="any" data-ch="offset" value="${ok(r[2]) ? r[2] : ''}"></div></div>`).join('')}
       <p class="hint">For files that carry no sensor heights (SecondWind Nomad2), and to put right a height or a vane's north offset that the files give wrongly or not at all (NRG Symphonie text exports, WindPRO exports). Name the sensor as the file does: a port such as A4, a channel such as CH7, or V1 and D1 for a WindPRO export. Empty the name to take a line out.</p></details>`;
+  }
+
+  function clockEditor() {
+    const cc = S.project.data.clock_corrections || [];
+    const rows = cc.map(c => [c.from, c.to, c.minutes, c.program || '', c.note || '']).concat([['', '', '', '', '']]);
+    return `<details class="more"${cc.length ? ' open' : ''}><summary>Logger clock corrections</summary>
+      ${rows.map((r, i) => `<div class="clkrow"><div class="row3"><div class="field"><label for="ck-f${i}">From, as the logger wrote it</label><input id="ck-f${i}" type="text" data-ck="from" value="${esc(r[0] || '')}" placeholder="2025-03-10 14:40" autocomplete="off"></div>
+        <div class="field"><label for="ck-t${i}">To, as the logger wrote it</label><input id="ck-t${i}" type="text" data-ck="to" value="${esc(r[1] || '')}" placeholder="2025-04-02 09:10" autocomplete="off"></div>
+        <div class="field"><label for="ck-m${i}">Minutes to add</label><input id="ck-m${i}" type="number" step="1" data-ck="minutes" value="${ok(r[2]) ? r[2] : ''}" placeholder="60"></div></div>
+        <div class="row2"><div class="field"><label for="ck-p${i}">Logger program (optional)</label><input id="ck-p${i}" type="text" data-ck="program" value="${esc(r[3])}" autocomplete="off"></div>
+        <div class="field"><label for="ck-n${i}">Why</label><input id="ck-n${i}" type="text" data-ck="note" value="${esc(r[4])}" autocomplete="off"></div></div></div>`).join('')}
+      <p class="hint">For a period when the logger's clock was wrong, for example set to UTC+1 instead of UTC+2 at a site visit. The records written between the two times are moved by the minutes given before the checks run: 60 for a clock an hour behind. When the wrong clock came with a new logger program, name the program, so that two records the clock gave the same time are told apart. Campbell TOA5 files and the text exports. Empty both times to take a line out.</p></details>`;
   }
 
   function runCard(key, st) {
@@ -672,6 +684,16 @@
         if (port && (h !== '' || o !== '')) channels[port] = { height_m: h === '' ? null : Number(h), direction_offset_deg: o === '' ? null : Number(o) };
       });
       saveSettings('data', { channels }, true);
+      return;
+    }
+    if (el.dataset.ck) {
+      const rows = [...main.querySelectorAll('.clkrow')].map(row => {
+        const g = k => row.querySelector(`[data-ck="${k}"]`).value.trim();
+        return { from: g('from'), to: g('to'), minutes: g('minutes'), program: g('program'), note: g('note') };
+      });
+      const state = r => (!r.from && !r.to) ? 'empty' : (r.from && r.to && r.minutes !== '') ? 'full' : 'part';
+      if (rows.some(r => state(r) === 'part')) return;            // a period half written in: wait for the rest
+      saveSettings('data', { clock_corrections: rows.filter(r => state(r) === 'full').map(r => ({ ...r, minutes: Number(r.minutes) })) }, true);
       return;
     }
     if (el.dataset.loss !== undefined) {

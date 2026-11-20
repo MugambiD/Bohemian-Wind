@@ -90,6 +90,8 @@ class Dataset:
     # site properties as logged, before any site settings file was applied
     site_logged: dict = field(default_factory=dict)
     settings: dict = field(default_factory=dict)
+    # logger clock corrections set in the project, as applied: [{"from", "to", "minutes", "program", "note", "records"}]
+    clock_corrections: list = field(default_factory=list)
 
 
 def _read_lines(path) -> list[str]:
@@ -259,15 +261,17 @@ def merge_duplicates(data: pd.DataFrame, names: list) -> tuple:
     the most complete copy is kept. Where values disagree, none can be trusted; a logger that
     restarts a file mid-interval (site visits) writes a part-interval record. Those timestamps
     are kept once with every value blanked, so the checks can flag them as conflicts.
-    data carries the column _src (index into names). Returns (data, identical_removed,
-    conflict_times, conflict_rows, table of conflicts).
+    data carries the column _src (index into names). Columns whose names start with an underscore are
+    bookkeeping (the file a record came from, the logger program its file's header names) and are not
+    compared: one record copied into files with different headers is still one record.
+    Returns (data, identical_removed, conflict_times, conflict_rows, table of conflicts).
     """
     data = data.sort_index(kind="stable")
     empty = pd.DataFrame(columns=["timestamp", "records", "files", "differing_columns", "largest_difference"])
     dup = data.index.duplicated(keep=False)
     if not dup.any():
         return data, 0, pd.DatetimeIndex([]), 0, empty
-    vals = data.drop(columns="_src")
+    vals = data.drop(columns=[c for c in data.columns if str(c).startswith("_")])
     d = vals[dup]
     grp = d.groupby(level=0)
     hi, lo = grp.max(), grp.min()
@@ -294,7 +298,7 @@ def merge_duplicates(data: pd.DataFrame, names: list) -> tuple:
                      "differing_columns": len(cols),
                      "largest_difference": f"{c}: {lo.loc[t, c]:g} to {hi.loc[t, c]:g}"})
     if len(conflict_times):
-        value_cols = [c for c in out.columns if c != "_src"]
+        value_cols = [c for c in out.columns if not str(c).startswith("_")]
         out = out.copy()
         out.loc[out.index.isin(conflict_times), value_cols] = np.nan
     return out, int(identical_removed), conflict_times, conflict_rows, pd.DataFrame(rows, columns=empty.columns)

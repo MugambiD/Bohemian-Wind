@@ -76,7 +76,8 @@ def _feed_map(s: dict) -> dict:
 # longer belongs to the settings on the screen and the step is out of date. Settings that reach a step only through
 # an earlier one are left to that one: the position of the mast is in step 1, and everything rests on step 1.
 FEEDS = {
-    "data": lambda s: {"site": s["site"], "folder": s["data"].get("folder"), "channels": s["data"].get("channels") or {}},
+    "data": lambda s: {"site": s["site"], "folder": s["data"].get("folder"), "channels": s["data"].get("channels") or {},
+                       "clock": s["data"].get("clock_corrections") or []},
     "longterm": _feed_longterm,
     "map": _feed_map,
     "layout": lambda s: dict(s["layout"]),
@@ -164,7 +165,10 @@ def defaults() -> dict:
                  # shear exponent to use instead of the measured one (empty = measured)
                  "shear_alpha": None,
                  # for loggers whose files carry no sensor heights (Nomad2): {"A4": {"height_m": 78, "direction_offset_deg": -28}}
-                 "channels": {}},
+                 "channels": {},
+                 # periods a logger's clock was wrong, as written: [{"from": "2025-03-10 14:40", "to": "2025-04-02 09:10",
+                 # "minutes": 60, "program": "<logger program, optional>", "note": "why"}]
+                 "clock_corrections": []},
         "longterm": {"source": "power", "monthly_file": "", "daily_file": ""},
         # 50 m cells: on a real ridge the crests were narrower than 100 m cells, and a layout lost several per cent of its energy
         "map": {"engine": "linear", "height_m": 120.0, "half_km": 8.0, "res_m": 50.0, "z0_m": 0.05, "gwa_dir": "",
@@ -226,6 +230,39 @@ def _channels(raw) -> dict:
             row["direction_offset_deg"] = off
         if row:
             out[port] = row
+    return out
+
+
+def _clock(raw) -> list:
+    """Logger clock corrections as the reader takes them, checked: times as the logger wrote them, whole minutes."""
+    if raw in (None, ""):
+        return []
+    if not isinstance(raw, list):
+        raise ProjectError("Clock corrections must be a list of periods.")
+    out = []
+    for i, r in enumerate(raw, 1):
+        if not isinstance(r, dict) or not any(str(r.get(k) or "").strip() for k in ("from", "to", "minutes")):
+            continue
+        times = []
+        for k in ("from", "to"):
+            v = str(r.get(k) or "").strip().replace("T", " ")
+            try:
+                times.append(datetime.strptime(v[:16], "%Y-%m-%d %H:%M"))
+            except ValueError:
+                raise ProjectError(f"Clock correction {i}: write the '{k}' time as 2025-03-10 14:40.") from None
+        if times[1] < times[0]:
+            raise ProjectError(f"Clock correction {i}: the 'to' time comes before the 'from' time.")
+        minutes = _num(r.get("minutes"), f"Clock correction {i}: minutes to add", -1440, 1440)
+        if round(minutes) != minutes or not minutes:
+            raise ProjectError(f"Clock correction {i}: give the minutes to add as a whole number, not 0 (60 for a clock an hour behind).")
+        row = {"from": f"{times[0]:%Y-%m-%d %H:%M}", "to": f"{times[1]:%Y-%m-%d %H:%M}", "minutes": int(minutes)}
+        prog = str(r.get("program") or "").strip()[:120]
+        note = str(r.get("note") or "").strip()[:300]
+        if prog:
+            row["program"] = prog
+        if note:
+            row["note"] = note
+        out.append(row)
     return out
 
 
@@ -298,11 +335,14 @@ class Project:
                 except EnergyError as e:
                     raise ProjectError(str(e)) from e
             channels = values.pop("channels", None) if section == "data" else None
+            clock = _clock(values.pop("clock_corrections")) if section == "data" and "clock_corrections" in values else None
             self.s[section] = _merge(self.s[section], values)
             if section == "layout" and "buildings_file" in values and not values["buildings_file"]:
                 self.s["results"].pop("buildings", None)       # the fetched buildings were removed: so is their summary
             if channels is not None:            # replaced as a whole, so a sensor can be taken out again
                 self.s["data"]["channels"] = _channels(channels)
+            if clock is not None:               # replaced as a whole too
+                self.s["data"]["clock_corrections"] = clock
         else:
             raise ProjectError(f"Unknown settings section '{section}'.")
         self.save()
@@ -742,7 +782,8 @@ class Project:
             settings_path.write_text(json.dumps(vals, indent=1), encoding="utf-8")
         try:
             out = intake.run_checks(src, self.folder, site_name=self.s["name"] or None, settings_path=settings_path, log=log,
-                                    channels=self.s["data"].get("channels") or None)
+                                    channels=self.s["data"].get("channels") or None,
+                                    clock=self.s["data"].get("clock_corrections") or None)
         except intake.IntakeError as e:
             raise ProjectError(str(e)) from e
         if not out.get("climate"):

@@ -84,12 +84,12 @@ It runs step 1 if new files arrived, records what is new in `intake/status.json`
 
 ## Where each part stands
 
-Honest status of this version (0.2.6-dev). "Working" means it runs end to end and is covered by tests with known answers; it does not mean validated against measurements.
+Honest status of this version (0.2.7-dev). "Working" means it runs end to end and is covered by tests with known answers; it does not mean validated against measurements.
 
 | Capability | State |
 |---|---|
 | Daily mast data arriving automatically | **Working as a folder watch.** It re-runs the checks when logger files appear and warns when data stops. It does not fetch from the logger, its email or its cloud service: point those at the folder. |
-| Data quality checks and analysis | **Working** for NRG SymphoniePRO, NRG Symphonie text exports (Symphonie Data Retriever), Campbell Scientific TOA5, SecondWind Nomad2 and WindPRO time series exports. RLD files need NRG's free SymPRO Desktop (Windows) to convert them, raw RWD files NRG's free Symphonie Data Retriever. ZIP, RAR, 7z and tar archives of logger files are opened as they are; RAR and 7z with the archive program the computer already has. |
+| Data quality checks and analysis | **Working** for NRG SymphoniePRO, NRG Symphonie text exports (Symphonie Data Retriever), Campbell Scientific TOA5, SecondWind Nomad2 and WindPRO time series exports. RLD files need NRG's free SymPRO Desktop (Windows) to convert them, raw RWD files NRG's free Symphonie Data Retriever. ZIP, RAR, 7z and tar archives of logger files are opened as they are; RAR and 7z with the archive program the computer already has. A period when the logger's clock was wrong can be corrected in the project. |
 | Long-term correction | **Working, one method:** a monthly index against NASA POWER (MERRA-2 at 50 m), with a check of the vane's north against the reanalysis wind direction. No second reference, no hourly method yet. |
 | Wind resource maps | **Working, three methods:** the own flow model over SRTM terrain, the Global Wind Atlas pattern scaled to the mast, or CFD with OpenFOAM. |
 | Own flow model | **First version.** Terrain speed-up from linear theory (Jackson and Hunt). Tested against theory and, in house, against measured masts: sound on gentle ground, wrong at an escarpment. Not for steep terrain; the application says when the ground is too steep. |

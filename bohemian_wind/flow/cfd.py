@@ -635,6 +635,27 @@ def estimate(core_half: float, s: Settings, sectors: int) -> dict:
     return {"cells_per_sector": cells, "workers": workers, "hours": round(0.6 * full, 1), "hours_at_most": round(full, 1)}
 
 
+ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+
+
+def keep_awake(on: bool, kernel32=None) -> bool:
+    """Ask Windows not to go to sleep while a CFD run goes on, and allow it again afterwards. The computer can still
+    be put to sleep by hand, and the screen still turns off. Does nothing on other systems. Returns whether the
+    request was made."""
+    if kernel32 is None:
+        if os.name != "nt":
+            return False
+        try:
+            import ctypes  # noqa: PLC0415
+            kernel32 = ctypes.windll.kernel32
+        except (ImportError, AttributeError, OSError):
+            return False
+    try:
+        return bool(kernel32.SetThreadExecutionState(ES_CONTINUOUS | (ES_SYSTEM_REQUIRED if on else 0)))
+    except Exception:  # noqa: BLE001  (a run must not fail for this)
+        return False
+
+
 def run(grid: Grid, centres, out_dir, core_half: float, s: Settings | None = None, heights=HEIGHTS, log=print,
         stop=None, keep_cases: bool = False) -> dict:
     """Every sector, side by side up to s.workers at a time. Writes cfd.npz (speeds [sector, height, row, col] on
@@ -690,6 +711,8 @@ def run(grid: Grid, centres, out_dir, core_half: float, s: Settings | None = Non
 
     watcher = __import__("threading").Thread(target=report, daemon=True)
     watcher.start()
+    if keep_awake(True):
+        log("CFD: the computer is asked to stay awake until the run ends (it can still be put to sleep by hand).")
     try:
         with cf.ThreadPoolExecutor(max_workers=est["workers"]) as pool:
             futs = [pool.submit(one, i) for i in range(len(centres))]
@@ -715,6 +738,8 @@ def run(grid: Grid, centres, out_dir, core_half: float, s: Settings | None = Non
         if not keep_cases:
             shutil.rmtree(work, ignore_errors=True)
         raise
+    finally:
+        keep_awake(False)
     meta = {"version": VERSION, "centres": centres, "heights": list(heights), "core_half_m": core_half,
             "settings": s.as_dict(), "sectors": infos, "openfoam": of["label"], "seconds": round(time.time() - t0, 1),
             "grid": {"lat0": grid.lat0, "lon0": grid.lon0, "res": cg.res, "shape": list(cg.shape)}}

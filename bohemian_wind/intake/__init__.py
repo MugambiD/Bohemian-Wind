@@ -171,10 +171,11 @@ def _plain(text: str) -> str:
 
 
 def run_checks(path, out_root, site_name: str | None = None, settings_path=None, log=print,
-               sympro_path=None, password: str = "", channels: dict | None = None) -> dict:
+               sympro_path=None, password: str = "", channels: dict | None = None, clock: list | None = None) -> dict:
     """Run step 1 on a data folder. Outputs go to <out_root>/runs/<name>_<time>/. Returns summarise(run folder).
     channels: sensor heights and vane offsets by logger port or channel, for formats whose files do not carry them
-    or carry them wrongly (Nomad2 ports such as A4, NRG Symphonie channels such as CH7)."""
+    or carry them wrongly (Nomad2 ports such as A4, NRG Symphonie channels such as CH7).
+    clock: logger clock corrections for periods a logger's clock was wrong (loggers.toa5_mast.clock_rules)."""
     path = paths.tidy(path)
     out_root = Path(out_root)
     if not path.exists():
@@ -200,6 +201,9 @@ def run_checks(path, out_root, site_name: str | None = None, settings_path=None,
         raise IntakeError("This folder holds files of more than one kind (" + det["found"] + "). Choose the folder, or "
                           "the file, of one mast in one format.")
     log(f"Logger format: {det['label']} ({det['found']}).")
+    if det["format"] == "sympro" and clock:
+        raise IntakeError("Clock corrections are applied to Campbell TOA5 files and the text exports this version reads, "
+                          "not yet to NRG SymphoniePRO files. Take them out to run step 1.")
     if det["format"] == "sympro":
         from .. import report as _report  # noqa: PLC0415
         from ..pipeline import PipelineError, run  # noqa: PLC0415
@@ -223,9 +227,12 @@ def run_checks(path, out_root, site_name: str | None = None, settings_path=None,
         args += ["--out", str(out_root)]
         if site_name:
             args += ["--name", site_name]
-        if channels:                           # this reader takes sensor settings in the same file as the site settings
+        if channels or clock:                  # this reader takes these in the same file as the site settings
             merged = json.loads(Path(settings_path).read_text(encoding="utf-8")) if settings_path and Path(settings_path).is_file() else {}
-            merged["channels"] = channels
+            if channels:
+                merged["channels"] = channels
+            if clock:
+                merged["clock_corrections"] = clock
             settings_path = out_root / "runs" / "reader_settings.json"
             settings_path.parent.mkdir(parents=True, exist_ok=True)
             settings_path.write_text(json.dumps(merged, indent=1), encoding="utf-8")

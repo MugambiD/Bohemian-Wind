@@ -11,7 +11,7 @@ abstract: >-
   assessment.
 authors:
   - name: "Bohemian Renewables (Africa)"
-version: "0.2.6-dev"
+version: "0.2.7-dev"
 date-released: "2026-11-20"
 license: MIT
 repository-code: "https://github.com/MugambiD/bohemian-wind"

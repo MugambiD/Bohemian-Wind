@@ -6,6 +6,15 @@ What changed in each version of Bohemian Wind. The format follows [Keep a Change
 
 ## [Unreleased]
 
+## [0.2.7-dev] - 2026-11-20
+
+### Added
+- Logger clock corrections in step 1: for a period when a logger's clock was wrong, the records written between two times are moved by whole minutes before the files are merged. A correction can be limited to the records of one logger program, which tells apart two records the wrong clock gave the same time. Entered on the *Mast data* screen; the findings say how many records moved. Campbell TOA5 files and the text exports.
+- CFD: Windows is asked to stay awake while a CFD run goes on. It can still be put to sleep by hand.
+
+### Fixed
+- Copies of the same record in files whose headers name different logger programs (an export beside the daily files, say) were quarantined as conflicting records. They are merged as the copies they are.
+
 ## [0.2.6-dev] - 2026-11-20
 
 ### Added
@@ -89,7 +98,8 @@ What changed in each version of Bohemian Wind. The format follows [Keep a Change
 
 Before 0.2.0-dev, Bohemian Wind was a stand-alone data-check window (`qc_main.py`, still included). Its history is not in this repository.
 
-[Unreleased]: https://github.com/MugambiD/bohemian-wind/compare/v0.2.6-dev...HEAD
+[Unreleased]: https://github.com/MugambiD/bohemian-wind/compare/v0.2.7-dev...HEAD
+[0.2.7-dev]: https://github.com/MugambiD/bohemian-wind/releases/tag/v0.2.7-dev
 [0.2.6-dev]: https://github.com/MugambiD/bohemian-wind/releases/tag/v0.2.6-dev
 [0.2.5-dev]: https://github.com/MugambiD/bohemian-wind/commit/9e42b7f
 [0.2.4-dev]: https://github.com/MugambiD/bohemian-wind/commit/3d7490c
