@@ -257,7 +257,8 @@ def site_consistency(per_file: list) -> dict:
 def merge_duplicates(data: pd.DataFrame, names: list) -> tuple:
     """Records that share a timestamp, from overlapping files.
 
-    Where every value agrees (or is blank in all but one record) the copies are one record:
+    Where every value agrees (or is blank in all but one record) the copies are one record (agreeing means to
+    within one unit in the 7th significant digit, the most a logger's text export writes):
     the most complete copy is kept. Where values disagree, none can be trusted; a logger that
     restarts a file mid-interval (site visits) writes a part-interval record. Those timestamps
     are kept once with every value blanked, so the checks can flag them as conflicts.
@@ -275,7 +276,8 @@ def merge_duplicates(data: pd.DataFrame, names: list) -> tuple:
     d = vals[dup]
     grp = d.groupby(level=0)
     hi, lo = grp.max(), grp.min()
-    tol = 1e-6 + 1e-9 * np.maximum(hi.abs(), lo.abs())
+    # copies of a record written out by different programs can round the 7th significant digit differently
+    tol = 1e-6 + 2e-6 * np.maximum(hi.abs(), lo.abs())
     differs = (hi - lo) > tol  # NaN compares False: a value present in one copy only does not conflict
     bad = differs.any(axis=1)
     conflict_times = pd.DatetimeIndex(bad.index[bad])

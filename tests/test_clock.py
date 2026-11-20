@@ -67,6 +67,12 @@ def test_copies_in_files_whose_headers_differ_are_one_record(mast):
     frame = pd.DataFrame({"ws": [5.0, 5.0, 6.0], "_src": [0, 1, 1], "_prog": [0.0, 1.0, 1.0]}, index=d)
     out, removed, conflict_times, _, _ = merge_duplicates(frame, ["a.dat", "b.dat"])
     assert removed == 1 and len(conflict_times) == 0 and len(out) == 2
+    # one export writes 865.5312, another 865.5313: the same record rounded differently, not two records
+    frame = pd.DataFrame({"pa": [865.5312, 865.5313, 865.6], "ws": [7.199552, 7.199553, 7.3], "_src": [0, 1, 1]},
+                         index=pd.DatetimeIndex(["2025-01-01 00:10"] * 2 + ["2025-01-01 00:20"]))
+    assert len(merge_duplicates(frame, ["a.dat", "b.dat"])[2]) == 0
+    frame.iloc[1, frame.columns.get_loc("ws")] = 7.21                        # a different measurement: a conflict
+    assert len(merge_duplicates(frame, ["a.dat", "b.dat"])[2]) == 1
 
 
 def test_a_clock_correction_puts_the_records_back_in_their_place(mast):

@@ -13,7 +13,7 @@ What changed in each version of Bohemian Wind. The format follows [Keep a Change
 - CFD: Windows is asked to stay awake while a CFD run goes on. It can still be put to sleep by hand.
 
 ### Fixed
-- Copies of the same record in files whose headers name different logger programs (an export beside the daily files, say) were quarantined as conflicting records. They are merged as the copies they are.
+- Copies of the same record in files whose headers name different logger programs (an export beside the daily files, say), or that round the 7th significant digit differently, were quarantined as conflicting records. They are merged as the copies they are.
 
 ## [0.2.6-dev] - 2026-11-20
 
