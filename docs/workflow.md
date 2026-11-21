@@ -92,6 +92,14 @@ Every data check and every permitting pack is written to a folder of its own. A 
 
 **Stops at.** Screening. No background noise survey, no octave bands, no manufacturer sound data, no tonal or low-frequency assessment; no cloud statistics or obstacles for flicker. The ground formula used here gives lower noise levels far from the turbines than the general method with a ground factor of 0.5 that formal wind-farm noise studies use; against an independent screening of a real layout the two were close where levels approach usual limits and drifted apart with distance. The flicker hours matched that screening at homes computed at the same point.
 
+## What every run leaves beside its results
+
+**A Google Earth file.** Step 3 writes `maps/wind_map.kmz` and step 4 writes `layout/layout.kmz`. Open either in Google Earth: the wind map lies over the ground in its wind speed classes; beside it stand the key to the classes, a sign with the height and the energy rose of the mast. The mast, the edge of the area mapped and, in the layout's file, every turbine with its figures can be clicked. The classes are fixed (below 5 m/s, then steps of 0.5, 0.25 and, between 6 and 11 m/s, 0.2 m/s, up to 13 m/s and above), so the colours mean the same wind on every site.
+
+**Three Word reports**, in `reports/`, in the Bohemian Renewables house template: a *wind resource analysis* of the measurement, a *micrositing and energy estimate* of the layout, and a *project wind summary* that ties both together. Steps 1, 2, 4, 5 and 6 write them again from the results the project holds at that moment, so they never lag behind the screen. A report whose step has not been run yet is left out: after step 1 there is a wind resource analysis and a summary, the micrositing report comes with step 4. Close a report in Word before running a step, or that one cannot be written over (the step says so and carries on).
+
+The reports set out what the steps computed and nothing more. Every one carries the notice that it is a developer estimate, lists where the analysis departs from usual practice, and leaves the "Reviewed" and "Approved" fields of its document control empty for a person to fill.
+
 ## 6. Permitting pack
 
 **Does.** Writes one folder, a new one each time: turbine coordinates (latitude and longitude, UTM, ground elevation, hub and tip heights above ground and above sea level), the layout as GeoJSON and KML, the record of siting rules, the noise and flicker tables and maps, and a summary page. Everything the earlier steps flagged to check before relying on the figures is repeated on the summary page. A screening that is out of date is left out, and the page says so and why; homes that could not be assessed are counted there and their list is in the folder.

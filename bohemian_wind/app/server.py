@@ -33,7 +33,9 @@ TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
          ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml", ".ico": "image/x-icon",
          ".woff2": "font/woff2", ".csv": "text/csv; charset=utf-8", ".txt": "text/plain; charset=utf-8",
          ".log": "text/plain; charset=utf-8", ".kml": "application/vnd.google-earth.kml+xml",
-         ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
+         ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+         ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+         ".kmz": "application/vnd.google-earth.kmz"}
 CSP = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'"
 PICKER = r'''
 import sys, tkinter as tk

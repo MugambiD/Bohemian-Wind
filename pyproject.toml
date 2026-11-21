@@ -27,6 +27,7 @@ classifiers = [
 dependencies = [
   "numpy>=1.26", "pandas>=2.2", "matplotlib>=3.8", "openpyxl>=3.1",
   "scipy>=1.11", "xarray>=2024.1", "py_wake>=2.6", "h5py>=3.10",
+  "python-docx>=1.1",
 ]
 
 [project.optional-dependencies]
@@ -52,6 +53,7 @@ include = ["bohemian_wind*"]
 
 [tool.setuptools.package-data]
 "bohemian_wind.app" = ["static/*", "static/img/*", "static/fonts/*"]
+"bohemian_wind.reports" = ["template.docx"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -6,6 +6,16 @@ What changed in each version of Bohemian Wind. The format follows [Keep a Change
 
 ## [Unreleased]
 
+## [0.3.0-dev] - 2026-11-21
+
+### Added
+- The wind map as a Google Earth file (`.kmz`) from every wind map and every layout: the map laid over the ground in its wind speed classes, with the key to the classes, a sign with the height, the energy rose of the mast, the mast, the edge of the area mapped and, for a layout, the turbines with their figures. Everything is inside the one file.
+- Three Word reports in the Bohemian Renewables house template, written again by every step from the results the project holds: a wind resource analysis (setup, data checks, wind statistics, long-term correction, shear, uncertainty, departures from usual practice), a micrositing and energy report (wind map, siting rules, layout, energy by turbine, uncertainty and exceedance levels, screening), and a project wind summary that ties them together. A report whose step has not been run is left out and said so. Needs the `python-docx` package (in `requirements.txt` and in the Windows setup program).
+- The permitting pack carries the three reports and the Google Earth file.
+
+### Changed
+- Wind maps are drawn in fixed wind speed classes, light blue through green and yellow to red, pink and brown, 0.2 m/s wide between 6 and 11 m/s. The classes are the same on every map and in the Google Earth file, so two sites can be laid side by side. The earlier maps used one hue stretched over each map's own range.
+
 ## [0.2.7-dev] - 2026-11-20
 
 ### Added
@@ -98,7 +108,8 @@ What changed in each version of Bohemian Wind. The format follows [Keep a Change
 
 Before 0.2.0-dev, Bohemian Wind was a stand-alone data-check window (`qc_main.py`, still included). Its history is not in this repository.
 
-[Unreleased]: https://github.com/MugambiD/bohemian-wind/compare/v0.2.7-dev...HEAD
+[Unreleased]: https://github.com/MugambiD/bohemian-wind/compare/v0.3.0-dev...HEAD
+[0.3.0-dev]: https://github.com/MugambiD/bohemian-wind/releases/tag/v0.3.0-dev
 [0.2.7-dev]: https://github.com/MugambiD/bohemian-wind/releases/tag/v0.2.7-dev
 [0.2.6-dev]: https://github.com/MugambiD/bohemian-wind/releases/tag/v0.2.6-dev
 [0.2.5-dev]: https://github.com/MugambiD/bohemian-wind/commit/9e42b7f

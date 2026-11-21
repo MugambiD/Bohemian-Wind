@@ -68,7 +68,7 @@ Six steps, in order. Each screen asks for what it needs on the left and shows wh
 | 3. **Wind map** | A height, an area and a method | Mean wind speed over the terrain round the mast |
 | 4. **Layout and energy** | Turbine size and number; your exclusion zones, homes and buffers | Turbine positions, wake loss, P50, P75 and P90 |
 | 5. **Noise and shadow flicker** | Limits to screen against | Every home checked, with maps |
-| 6. **Permitting pack** | Nothing | Coordinates with tip heights, GIS files, maps and a summary page |
+| 6. **Permitting pack** | Nothing | Coordinates with tip heights, GIS files, maps, the Google Earth wind map, the three Word reports and a summary page |
 
 <p align="center"><img src="docs/images/app-layout-map.jpg" alt="Layout step: constraints on the left, the layout over the wind map on the right" width="100%"></p>
 
@@ -84,7 +84,7 @@ It runs step 1 if new files arrived, records what is new in `intake/status.json`
 
 ## Where each part stands
 
-Honest status of this version (0.2.7-dev). "Working" means it runs end to end and is covered by tests with known answers; it does not mean validated against measurements.
+Honest status of this version (0.3.0-dev). "Working" means it runs end to end and is covered by tests with known answers; it does not mean validated against measurements.
 
 | Capability | State |
 |---|---|

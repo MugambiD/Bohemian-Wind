@@ -10,6 +10,9 @@ Bohemian Wind is Bohemian Renewables' own code under the MIT licence. It uses th
 | pandas | BSD-3-Clause | time series and tables | https://pandas.pydata.org |
 | Matplotlib | Matplotlib License (PSF-based) | charts and maps | https://matplotlib.org |
 | openpyxl | MIT | Excel output | https://openpyxl.readthedocs.io |
+| python-docx | MIT | the Word reports | https://python-docx.readthedocs.io |
+| lxml (installed by python-docx) | BSD-3-Clause; libxml2 and libxslt inside it under the MIT licence | reading and writing the Word files | https://lxml.de |
+| typing_extensions (installed by python-docx) | PSF-2.0 | required by python-docx | https://github.com/python/typing_extensions |
 | SciPy | BSD-3-Clause | required by PyWake | https://scipy.org |
 | xarray | Apache-2.0 | wind climate hand-off to PyWake | https://xarray.dev |
 | PyWake (DTU Wind and Energy Systems) | MIT | wake models, generic turbines, annual energy | https://gitlab.windenergy.dtu.dk/TOPFARM/PyWake |

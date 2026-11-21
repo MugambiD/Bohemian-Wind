@@ -1,9 +1,11 @@
 """Map pictures: wind speed, layout, noise and shadow flicker, in a dark theme for the app and a light theme for
 printed packs. Axes are kilometres east and north of the mast.
 
-Colour rules: magnitude uses one hue from near the surface to strong (never a rainbow); the state of a home
-(within or over a limit) uses a fixed status colour together with a marker shape and a legend label, never
-colour alone; text stays in the ink colours.
+Colour rules: mean wind speed is drawn in fixed classes (WIND_EDGES, WIND_COLOURS), the same on every map and in
+the Google Earth file, so that two sites can be laid side by side: light blue for the weakest wind, through green and
+yellow to red, then pink and brown for the strongest. The classes are narrow where sites are decided (0.2 m/s
+between 6 and 11 m/s). Noise uses one hue; the state of a home (within or over a limit) uses a fixed status colour
+together with a marker shape and a legend label, never colour alone; text stays in the ink colours.
 """
 from __future__ import annotations
 
@@ -14,7 +16,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
-from matplotlib.colors import BoundaryNorm, LinearSegmentedColormap, ListedColormap, Normalize  # noqa: E402
+from matplotlib.colors import BoundaryNorm, ListedColormap  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
 from matplotlib.patches import Circle, Patch  # noqa: E402
 
@@ -35,6 +37,37 @@ THEMES = {
               "noise": ["#FBE9DA", "#F6CBA6", "#EFA872", "#E28446", "#C4622A", "#964719"],
               "mast": "#eb6834", "home": "#2a78d6", "built": "#CF6C2E"},
 }
+# Mean wind speed classes, m/s: below 5; 5 to 5.5; quarter steps to 6; 0.2 steps to 11; quarter steps to 12; half
+# steps to 13; 13 and above. One colour each.
+WIND_EDGES = ([5.0, 5.5, 5.75] + [round(6.0 + 0.2 * i, 2) for i in range(26)] + [11.25, 11.5, 11.75, 12.0, 12.5, 13.0])
+WIND_COLOURS = [
+    "#E6F4F9", "#CAE8F2", "#92D0E6", "#62BCDC", "#49B2D7", "#449CC4", "#3E8098", "#407C6E", "#499B43", "#5FB850",
+    "#8FCD6D", "#AEDD75", "#D6F1A5", "#FFF2A3", "#FFDF69", "#FBD329", "#FCBD3E", "#FD9727", "#F86E06", "#FC5724",
+    "#FF3E09", "#EF2A03", "#DA0000", "#CB0C07", "#AC2E49", "#C03250", "#CE4260", "#D8667E", "#E490A2", "#EBB7B8",
+    "#E2C3AC", "#D6AB8A", "#C99065", "#BE7845", "#A4673A", "#875530"]
+assert len(WIND_COLOURS) == len(WIND_EDGES) + 1
+
+
+def wind_class(mean_ws) -> np.ndarray:
+    """The class (0 to len(WIND_COLOURS) - 1) of each wind speed; a speed on a limit belongs to the class above."""
+    return np.digitize(np.asarray(mean_ws, dtype=float), WIND_EDGES)
+
+
+def wind_class_labels() -> list:
+    """One label per class, as the legends print them."""
+    e = WIND_EDGES
+    return ([f"below {e[0]:.2f}"] + [f"{a:.2f} to {b - 0.01:.2f}" for a, b in zip(e[:-1], e[1:])] + [f"{e[-1]:.2f} and above"])
+
+
+def wind_rgb(mean_ws) -> np.ndarray:
+    """Class colours of a wind field as RGB in 0..1; cells without a value are white."""
+    table = np.array([matplotlib.colors.to_rgb(c) for c in WIND_COLOURS])
+    a = np.asarray(mean_ws, dtype=float)
+    rgb = table[wind_class(np.nan_to_num(a, nan=0.0))]
+    rgb[~np.isfinite(a)] = 1.0
+    return rgb
+
+
 STATUS = {"good": "#0ca30c", "warning": "#fab219", "serious": "#ec835a", "critical": "#d03b3b"}   # fixed in both themes
 FOOT = "Developer estimate, Bohemian Renewables, open-source tools. Not an accredited or bankable assessment."
 
@@ -105,6 +138,24 @@ def _colourbar(fig, mappable, t: dict, label: str, ticks=None):
     return cb
 
 
+def _wind_key(fig, t: dict, mean_ws, label: str) -> None:
+    """The classes that occur on this map, strongest at the top, each with its limits."""
+    k = wind_class(np.asarray(mean_ws)[np.isfinite(mean_ws)])
+    lo, hi = (int(k.min()), int(k.max())) if k.size else (0, 0)
+    lo, hi = max(lo - 1, 0), min(hi + 1, len(WIND_COLOURS) - 1)
+    n = hi - lo + 1
+    cmap = ListedColormap(WIND_COLOURS[lo:hi + 1])
+    cax = fig.add_axes([0.868, 0.5 - min(0.36, 0.013 * n + 0.05), 0.018, 2 * min(0.36, 0.013 * n + 0.05)])
+    cb = fig.colorbar(plt.cm.ScalarMappable(norm=BoundaryNorm(np.arange(n + 1), n), cmap=cmap), cax=cax,
+                      ticks=np.arange(1, n))
+    step = 1 if n <= 22 else 2
+    cb.ax.set_yticklabels([f"{WIND_EDGES[lo + i]:g}" if i % step == 0 else "" for i in range(n - 1)])
+    cb.outline.set_edgecolor(t["line"])
+    cb.outline.set_linewidth(0.6)
+    cb.ax.tick_params(colors=t["muted"], labelsize=7.5, length=2, width=0.5)
+    cb.set_label(label, color=t["ink2"], fontsize=8.5)
+
+
 def _mast(ax, t: dict, mast_xy=(0.0, 0.0)) -> Line2D:
     ax.plot(mast_xy[0] / 1000, mast_xy[1] / 1000, marker="^", ms=8, mfc=t["mast"], mec=t["surface"], mew=1.3, ls="none", zorder=9)
     return Line2D([], [], marker="^", ms=8, mfc=t["mast"], mec=t["surface"], mew=1.2, ls="none", label="Met mast")
@@ -157,16 +208,9 @@ def wind_map(grid: Grid, mean_ws: np.ndarray, path, *, height_m: float, theme: s
     """Mean wind speed over shaded terrain. With mask (buildable cells), the rest is veiled so the buildable area
     reads at a glance."""
     fig, ax, t = _figure(grid, theme, title, subtitle)
-    cmap = LinearSegmentedColormap.from_list("wind", t["wind"])
-    lo, hi = np.nanpercentile(mean_ws, [1, 99])
-    lo, hi = np.floor(lo * 2) / 2, np.ceil(hi * 2) / 2
-    if hi - lo < 1.0:
-        lo, hi = lo - 0.5, hi + 0.5
-    norm = Normalize(lo, hi)
-    rgb = cmap(norm(mean_ws))[..., :3]
     shade = hillshade(grid)
-    rgb = np.clip(rgb * (0.62 + 0.38 * shade[..., None] * 1.25), 0, 1)
-    ax.imshow(rgb, origin="lower", extent=_extent(grid), interpolation="bilinear", zorder=1)
+    rgb = np.clip(wind_rgb(mean_ws) * (0.70 + 0.30 * shade[..., None] * 1.25), 0, 1)
+    ax.imshow(rgb, origin="lower", extent=_extent(grid), interpolation="nearest", zorder=1)
     _terrain(ax, grid, t)
     handles = []
     if mask is not None:
@@ -175,7 +219,8 @@ def wind_map(grid: Grid, mean_ws: np.ndarray, path, *, height_m: float, theme: s
         veil[..., 3] = np.where(mask, 0.0, 0.62)
         ax.imshow(veil, origin="lower", extent=_extent(grid), interpolation="nearest", zorder=2)
         ax.contour(grid.x / 1000, grid.y / 1000, mask.astype(float), levels=[0.5], colors=t["ink"], linewidths=0.7, alpha=0.75, zorder=3)
-        handles.append(Patch(facecolor=cmap(0.6), edgecolor=t["ink"], lw=0.7, label="Buildable area"))
+        handles.append(Patch(facecolor=WIND_COLOURS[int(np.median(wind_class(mean_ws[mask])))] if mask.any() else t["surface"],
+                             edgecolor=t["ink"], lw=0.7, label="Buildable area"))
         handles.append(Patch(facecolor=t["veil"], edgecolor=t["line"], lw=0.7, alpha=0.9, label="Ruled out by the constraints"))
     if boundary:
         _feature_lines(ax, grid, boundary, t["ink"], lw=1.3)
@@ -193,8 +238,7 @@ def wind_map(grid: Grid, mean_ws: np.ndarray, path, *, height_m: float, theme: s
     if turbines:
         handles.append(_turbines(ax, t, turbines))
     _legend(ax, t, handles)
-    sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
-    _colourbar(fig, sm, t, f"Mean wind speed at {height_m:g} m, m/s")
+    _wind_key(fig, t, mean_ws, f"Mean wind speed at {height_m:g} m, m/s")
     ax.set_xlim(_extent(grid)[:2])
     ax.set_ylim(_extent(grid)[2:])
     ax.set_aspect("equal")

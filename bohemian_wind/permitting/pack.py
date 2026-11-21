@@ -147,6 +147,15 @@ def build(project, log=print) -> dict:
                               "Homes outside the terrain of the wind map: not assessed for noise or shadow flicker")):
         if rel and (project.folder / rel).is_file():
             shutil.copyfile(project.folder / rel, put(fname, what))
+    for rel, fname, what in ((lay.get("kmz"), "wind_map_and_layout.kmz", "Wind map in its wind speed classes with the turbines, key and energy rose, for Google Earth"),):
+        if rel and (project.folder / rel).is_file():
+            shutil.copyfile(project.folder / rel, put(fname, what))
+    try:                                         # the Word reports, written afresh from the results the pack stands on
+        from ..reports import build as _reports  # noqa: PLC0415
+        for r in _reports.write_all(project, log=log)["files"]:
+            shutil.copyfile(project.folder / r["file"], put(Path(r["file"]).name, f"{r['what']} (Word)"))
+    except Exception as e:  # noqa: BLE001
+        log(f"Reports not added to the pack: {e}")
     if LOGO.is_file():
         shutil.copyfile(LOGO, out_dir / "logo.png")
 

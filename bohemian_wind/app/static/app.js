@@ -343,6 +343,14 @@
       <p class="hint">For files that carry no sensor heights (SecondWind Nomad2), and to put right a height or a vane's north offset that the files give wrongly or not at all (NRG Symphonie text exports, WindPRO exports). Name the sensor as the file does: a port such as A4, a channel such as CH7, or V1 and D1 for a WindPRO export. Empty the name to take a line out.</p></details>`;
   }
 
+  // the Google Earth file and the Word reports a step left, as download buttons
+  function outputLinks(r) {
+    let h = '';
+    if (r.kmz) h += `<a class="btn" href="${fileUrl(r.kmz, r.at)}">Download the Google Earth map (.kmz)</a>`;
+    (r.reports || []).forEach(x => { h += `<a class="btn" href="${fileUrl(x.file, r.at)}">${esc(x.what)} (Word)</a>`; });
+    return h;
+  }
+
   function clockEditor() {
     const cc = S.project.data.clock_corrections || [];
     const rows = cc.map(c => [c.from, c.to, c.minutes, c.program || '', c.note || '']).concat([['', '', '', '', '']]);
@@ -405,7 +413,7 @@
             + (monthly.length ? `<details class="more"><summary>Monthly means at ${num(r.top_height_m, 0)} m</summary>${table(['Month', 'Mean, m/s', 'Valid, %'], monthly.map(m => [monthName(m.month), num(m.mean, 2), num(100 * m.share, 0)]), [1, 2])}</details>` : ''))}
         </div>
         ${flags ? card('Records flagged, by sensor', flags + '<p class="hint">A flagged record is left out of the statistics. The full list of periods is in the Excel summary.</p>') : ''}
-        ${card('Files of this run', `<div class="links">${r.report ? `<a class="btn" href="${fileUrl(r.report)}" target="_blank" rel="noopener">Open the full report</a>` : ''}${r.excel ? `<a class="btn" href="${fileUrl(r.excel)}">Download the Excel summary</a>` : ''}<button class="btn" type="button" data-act="reveal" data-path="${esc(r.run_dir)}">Open the run folder</button></div>
+        ${card('Files of this run', `<div class="links">${r.report ? `<a class="btn" href="${fileUrl(r.report)}" target="_blank" rel="noopener">Open the full report</a>` : ''}${r.excel ? `<a class="btn" href="${fileUrl(r.excel)}">Download the Excel summary</a>` : ''}<button class="btn" type="button" data-act="reveal" data-path="${esc(r.run_dir)}">Open the run folder</button>${outputLinks(r)}</div>
           <p class="hint">${esc(r.format)}. Checks version ${esc(r.version)}.</p>`)}`;
     },
     longterm(r) {
@@ -435,7 +443,7 @@
         ${(r.warnings || []).length ? card(`${ICON.warn}Check before relying on this`, list(r.warnings), 'warnbox') : ''}
         <a href="${fileUrl(r.map, st.result.at)}" target="_blank" rel="noopener"><img class="map" src="${fileUrl(r.map, st.result.at)}" alt="Map of mean wind speed around the mast"></a>
         ${card('What the map rests on', list(r.notes) + (r.credits.length ? `<p class="hint">${r.credits.map(esc).join(' ')}</p>` : ''))}
-        ${card('', `<div class="links"><a class="btn" href="${fileUrl(r.map_print)}" target="_blank" rel="noopener">Open the print version</a></div>`)}`;
+        ${card('', `<div class="links"><a class="btn" href="${fileUrl(r.map_print)}" target="_blank" rel="noopener">Open the print version</a>${outputLinks(r)}</div>`)}`;
     },
     layout(r, st) {
       const u = r.uncertainty, t = r.turbine;
@@ -459,7 +467,7 @@
         ${card('Turbines', table(['', 'Latitude', 'Longitude', 'Ground, m', 'From mast, km', 'Wind, m/s', 'Wake, %', 'Net, MWh/yr', 'CF, %', 'Uncertainty, %'],
           r.positions.map(p => [esc(p.id), num(p.lat, 5), num(p.lon, 5), num(p.ground_elev_m, 0), num(p.dist_mast_km, 1), num(p.free_ws, 2), num(p.wake_loss_pct, 1), num(p.p50_mwh, 0), num(100 * p.capacity_factor, 1), p.sigma_energy_pct == null ? '' : num(p.sigma_energy_pct, 1)]), [1, 2, 3, 4, 5, 6, 7, 8, 9])
           + ((r.beyond_radius || []).length ? `<p class="note" style="margin-top:12px">${r.beyond_radius.length} position${r.beyond_radius.length > 1 ? 's' : ''} of your file ${r.beyond_radius.length > 1 ? 'lie' : 'lies'} more than ${num(r.rules.radius_km, 0)} km from the mast and ${r.beyond_radius.length > 1 ? 'are' : 'is'} left out: ${r.beyond_radius.slice(0, 12).map(b => esc(b.name)).join(', ')}${r.beyond_radius.length > 12 ? ' and others' : ''}.</p>` : '')
-          + `<div class="links" style="margin-top:12px"><a class="btn" href="${fileUrl(r.csv)}">Download the coordinates</a><a class="btn" href="${fileUrl(r.map_print)}" target="_blank" rel="noopener">Open the print map</a></div>`)}
+          + `<div class="links" style="margin-top:12px"><a class="btn" href="${fileUrl(r.csv)}">Download the coordinates</a><a class="btn" href="${fileUrl(r.map_print)}" target="_blank" rel="noopener">Open the print map</a>${outputLinks(r)}</div>`)}
         <div class="maps2">
           ${card('How sure is it', table(['Source of uncertainty', 'On energy, %'], Object.entries(u.terms_energy_pct).map(([k, v]) => [`<span style="white-space:normal">${esc(k)}</span>`, num(v, 1)]).concat([['Year-to-year wind, one year', num(u.iav_speed_pct * u.energy_per_speed, 1)]]), [1])
             + `<p class="hint">Combined: ${num(u.sigma_pct.long_term, 1)} % for the long-term average. One per cent more wind gives ${num(u.energy_per_speed, 2)} % more energy here.</p>`

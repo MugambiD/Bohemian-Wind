@@ -758,6 +758,46 @@ class Project:
         kfile.write_text(json.dumps(key), encoding="utf-8")
         return key
 
+    # ---------- outputs every run leaves: the Google Earth map and the Word reports ----------
+
+    def _kmz(self, fname: str, wf, height: float, turbines: list | None = None, log=print) -> str | None:
+        """The wind field as a Google Earth file in the project folder; never stops a step."""
+        try:
+            from . import kmz  # noqa: PLC0415
+            clim, site = self.climate(), self.site()
+            scale = self.speed_scale(clim)["scale"]
+            facts, lines = kmz.mast_facts(self.s["name"], site, clim, self.result("longterm") if not self.stale_reason("longterm") else None,
+                                          height, wf.engine, wf.grid.res, wf.grid.source or "")
+            rho = (clim.get("density") or {}).get("mean") or 1.225
+            note = ""
+            if turbines:
+                lay_t = self.s["layout"]
+                note = (f"Indicative layout, generic turbine of {float(lay_t.get('rated_kw') or 0) / 1000:g} MW. "
+                        "Developer estimate: positions and figures may change.")
+            p = kmz.write(self.path(*fname.split("/")), wf.grid, wf.mean_ws, name=f"{self.s['name']}: wind map at {height:g} m",
+                          height_m=height, mast={"lat": site["lat"], "lon": site["lon"], "label": "Met mast"},
+                          sectors=None if clim.get("no_direction") else clim["sectors"], rose_lines=lines, rho=float(rho),
+                          scale=scale, facts=facts, turbines=turbines, turbine_note=note)
+            log(f"Google Earth file: {self.rel(p)}.")
+            return self.rel(p)
+        except Exception as e:  # noqa: BLE001  (the step's own results are complete without it)
+            log(f"Google Earth file not written: {e}")
+            return None
+
+    def _reports(self, step: str, log=print) -> None:
+        """Write the Word reports the results allow, and note them on the step's result; never stops a step."""
+        try:
+            from .reports import build  # noqa: PLC0415
+            out = build.write_all(self, log=log)
+        except Exception as e:  # noqa: BLE001
+            log(f"Reports not written: {e}")
+            return
+        r = self.result(step)
+        if r is not None:
+            r["reports"] = out["files"]
+            r["reports_skipped"] = out["skipped"]
+            self.save()
+
     # ---------- step 1: mast data ----------
 
     def run_data(self, log=print) -> dict:
@@ -798,7 +838,9 @@ class Project:
         out["monthly"] = [{"month": k, "mean": v["mean"], "share": v["share"]} for k, v in sorted(clim["monthly"].items())]
         out["signature"] = intake.folder_signature(src)
         out["data_folder"] = str(src)
-        return self._store("data", out)
+        out = self._store("data", out)
+        self._reports("data", log)
+        return out
 
     def climate_from(self, rel: str) -> dict:
         return _climate.load(self.folder / rel)
@@ -848,7 +890,9 @@ class Project:
                 f"reanalysis on {v['days']} days with {v['min_ws']:g} m/s or more.")
         for c in res["cautions"]:
             log("  " + c)
-        return self._store("longterm", res)
+        res = self._store("longterm", res)
+        self._reports("longterm", log)
+        return res
 
     # ---------- step 3: terrain and wind map ----------
 
@@ -931,6 +975,7 @@ class Project:
         elif checks.get("position_check_note"):
             out["notes"].append(checks["position_check_note"])
         log(f"Wind map at {height:g} m: {out['min_ws']:.1f} to {out['max_ws']:.1f} m/s; {wf.mast_mean_ws:.2f} m/s at the mast.")
+        out["kmz"] = self._kmz("maps/wind_map.kmz", wf, height, log=log)
         return self._store("map", out)
 
     # ---------- step 4: constraints, layout, energy ----------
@@ -1103,12 +1148,15 @@ class Project:
         res["map"] = self.rel(maps.wind_map(grid, wf.mean_ws, self.path("layout", "layout_map.png"), theme="dark", **kw))
         res["map_print"] = self.rel(maps.wind_map(grid, wf.mean_ws, self.path("layout", "layout_map_print.png"), theme="light", **kw))
         res["csv"] = "layout/turbines.csv"
+        res["kmz"] = self._kmz("layout/layout.kmz", wf, turbine.hub_m, turbines=res["positions"], log=log)
         self.path("layout", "layout.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
         u = res["uncertainty"]
         log(f"{res['n_placed']} turbines, {res['capacity_mw']:.1f} MW: gross {res['gross_gwh']:.0f} GWh, wake loss "
             f"{res['wake_loss_pct']:.1f} %, other losses {res['other_loss_pct']:.1f} %, P50 {res['p50_gwh']:.0f} GWh a year "
             f"(capacity factor {100 * res['capacity_factor']:.1f} %), P90 over 10 years {u['p90_10_year']:.0f} GWh.")
-        return self._store("layout", res)
+        res = self._store("layout", res)
+        self._reports("layout", log)
+        return res
 
     # ---------- step 5: noise and shadow flicker ----------
 
@@ -1215,7 +1263,9 @@ class Project:
             log(f"  The project keeps the {LISTED_HOMES} most affected of the {len(receptors):,} homes; every home is in "
                 "noise_at_homes.csv and flicker_at_homes.csv.")
         self.path("environment", "environment.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
-        return self._store("environment", out)
+        out = self._store("environment", out)
+        self._reports("environment", log)
+        return out
 
     # ---------- step 6: permitting pack ----------
 
