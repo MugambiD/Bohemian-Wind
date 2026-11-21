@@ -275,7 +275,8 @@
       return card('Reference data', `<div class="choice" role="radiogroup" aria-label="Where the reference comes from">
           <label><input type="radio" name="lt-src" value="power" data-s="longterm" data-k="source" data-rerender="1"${src !== 'file' ? ' checked' : ''}><span><b>Download from NASA POWER</b><br><small style="color:var(--muted)">MERRA-2 wind speed at 50 m for the mast's position. Needs the internet.</small></span></label>
           <label><input type="radio" name="lt-src" value="file" data-s="longterm" data-k="source" data-rerender="1"${src === 'file' ? ' checked' : ''}><span><b>Use files I already have</b><br><small style="color:var(--muted)">NASA POWER point files in JSON.</small></span></label></div>
-          ${src === 'file' ? fText('longterm', 'monthly_file', 'Monthly file', { pick: 'file' }) + fText('longterm', 'daily_file', 'Daily file for the current year', { pick: 'file', help: 'Optional.' }) : ''}`);
+          ${src === 'file' ? fText('longterm', 'monthly_file', 'Monthly file', { pick: 'file' }) + fText('longterm', 'daily_file', 'Daily file for the current year', { pick: 'file', help: 'Optional.' }) : ''}
+          ${fText('longterm', 'second_file', 'Second reference, to set beside the first', { pick: 'file', help: 'Optional. A point time series of another reanalysis as CSV, for example the ERA5 hourly time series of the Copernicus Climate Data Store with the 100 m wind components (its zip is read as it comes). The step then shows both long-term means, and the uncertainty uses how far apart they are.' })}`);
     },
     map() {
       const m = S.project.map;
@@ -347,7 +348,7 @@
   function outputLinks(r) {
     let h = '';
     if (r.kmz) h += `<a class="btn" href="${fileUrl(r.kmz, r.at)}">Download the Google Earth map (.kmz)</a>`;
-    (r.reports || []).forEach(x => { h += `<a class="btn" href="${fileUrl(x.file, r.at)}">${esc(x.what)} (Word)</a>`; });
+    (r.reports || []).forEach(x => { h += `<a class="btn" href="${fileUrl(x.file, r.at)}">${esc(x.what)} (${/\.pdf$/i.test(x.file) ? 'PDF' : 'Word'})</a>`; });
     return h;
   }
 
@@ -430,6 +431,7 @@
           + `<details class="more"><summary>Show the numbers</summary>${table(['Month', 'Mast, m/s', 'Reference, m/s'], r.monthly.map(m => [monthName(m.month), num(m.mast, 2), num(m.reference, 2)]), [1, 2])}</details>`)}
         ${card('How the factor was made', list([`Method: ${r.method}.`, `Reference over the measured months ${num(r.reference_concurrent, 2)} m/s; over ${r.lt_years[0]} to ${r.lt_years[1]} ${num(r.reference_long_term, 2)} m/s.`,
           'One reference and one monthly method. A second reference and a daily or hourly method would test it.'].concat(left.length ? [`Reference months left out because they break the usual mast-to-reference ratio: ${left.join(', ')}.`] : [])
+          .concat(r.second ? [`Second reference (${r.second.what}): factor ${num(r.second.factor, 3)}, long-term mean ${num(r.second.long_term, 2)} m/s, ${r.second.difference_pct > 0 ? '+' : ''}${num(r.second.difference_pct, 1)} % from the first (monthly correlation r = ${num(r.second.r, 2)}). The first reference's mean is the one carried forward; the distance between the two sets the reference term of the uncertainty.`] : [])
           .concat(r.vane_check ? [`Vane north check: the wind direction at ${num(r.vane_check.height_m, 0)} m runs ${r.vane_check.median_deg > 0 ? '+' : ''}${num(r.vane_check.median_deg, 0)}° from the reanalysis direction on ${r.vane_check.days} days with ${num(r.vane_check.min_ws, 0)} m/s or more (the middle half of the days: ${num(r.vane_check.q25_deg, 0)}° to ${num(r.vane_check.q75_deg, 0)}°). Terrain turns the wind, so some tens of degrees are normal.`] : []))
           + `<p class="hint">${esc(r.credit || '')}</p>`)}`;
     },

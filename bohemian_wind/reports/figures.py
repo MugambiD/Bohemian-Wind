@@ -277,3 +277,54 @@ def exceedance(p50: float, sigma_pct: dict) -> bytes | None:
     ax.set_xticks([10, 25, 50, 75, 90, 99])
     ax.legend(fontsize=7.5, frameon=False)
     return _png(fig)
+
+
+def shading(pair, height_m, wakes: list | None = None) -> bytes | None:
+    """Tower shading at one level: the ratio of the two anemometers by wind direction. Away from the mast's wake the
+    ratio sits near 1; where one cup stands behind the mast it dips or peaks. wakes: (direction, label) to mark."""
+    if pair is None or len(pair) < 6:
+        return None
+    cols = {str(c): c for c in pair.columns}
+    x = np.asarray(pair[cols.get("sector_centre_deg", pair.columns[0])], dtype=float)
+    y = np.asarray(pair[cols.get("median_ratio", pair.columns[1])], dtype=float)
+    fig, ax = _fig(7.0, 2.9)
+    ax.axhline(1.0, color=MUTED, lw=0.7)
+    ax.axhspan(0.99, 1.01, color="#E6F3F2", zorder=0, label="Within 1 %")
+    ax.plot(x, y, color=TEAL, lw=1.4, marker="o", ms=3, label=f"Median ratio of the two anemometers at {height_m:g} m")
+    for deg, label in wakes or []:
+        if deg is not None and np.isfinite(deg):
+            ax.axvline(float(deg), color=ORANGE, lw=1.0, ls="--")
+            ax.text(float(deg), ax.get_ylim()[1], f" {label}", color=ORANGE, fontsize=7, va="top", rotation=90)
+    ax.set_xlim(0, 360)
+    ax.set_xticks(range(0, 361, 30))
+    span = max(0.06, float(np.nanmax(np.abs(y - 1.0))) * 1.25) if np.isfinite(y).any() else 0.06
+    ax.set_ylim(1 - span, 1 + span)
+    ax.set_xlabel("Wind direction, degrees", color=MUTED)
+    ax.set_ylabel("Ratio", color=MUTED)
+    ax.legend(fontsize=7.2, frameon=False, loc="lower left", ncol=2)
+    return _png(fig)
+
+
+def scatter(x, y, xlabel: str, ylabel: str) -> bytes | None:
+    """Two wind speed series against each other as a density of records, with the 1:1 line and the fitted ratio."""
+    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+    ok = np.isfinite(x) & np.isfinite(y)
+    if ok.sum() < 200:
+        return None
+    x, y = x[ok], y[ok]
+    fig, ax = _fig(4.2, 4.0)
+    ax.grid(axis="x", color=LINE, linewidth=0.6)
+    top = float(np.percentile(np.concatenate([x, y]), 99.9)) * 1.05
+    cmap = matplotlib.colors.LinearSegmentedColormap.from_list("d", ["#E6F3F2", "#74BDB5", "#008781", "#00433F"])
+    ax.hexbin(x, y, gridsize=55, extent=(0, top, 0, top), cmap=cmap, mincnt=1, bins="log", linewidths=0)
+    ax.plot([0, top], [0, top], color=MUTED, lw=0.8, ls="--", label="1 : 1")
+    slope = float((x * y).sum() / (x * x).sum())
+    r = float(np.corrcoef(x, y)[0, 1])
+    ax.plot([0, top], [0, slope * top], color=NAVY, lw=1.2, label=f"Ratio {slope:.3f}; r = {r:.3f}; {len(x):,} records")
+    ax.set_xlim(0, top)
+    ax.set_ylim(0, top)
+    ax.set_aspect("equal")
+    ax.set_xlabel(xlabel, color=MUTED)
+    ax.set_ylabel(ylabel, color=MUTED)
+    ax.legend(fontsize=7.2, frameon=False, loc="upper left")
+    return _png(fig)

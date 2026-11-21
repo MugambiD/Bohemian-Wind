@@ -19,3 +19,8 @@ if os.environ.get("BW_TEST_INSTALLED"):
     if here in where.parents:
         raise RuntimeError(f"BW_TEST_INSTALLED is set, but bohemian_wind was imported from the checkout ({where}).")
     print(f"Testing the installed copy: {where.parent}")
+
+
+import os  # noqa: E402
+
+os.environ.setdefault("BW_NO_PDF", "1")      # the Word reports are written in every run; their PDF copies are tested on their own

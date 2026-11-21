@@ -85,7 +85,7 @@ def _text(path) -> str:
 
 def test_after_step_1_the_wind_resource_report_is_written_and_the_micrositing_report_waits(project):
     r = project.result("data")
-    names = [Path(x["file"]).name for x in r["reports"]]
+    names = [Path(x["file"]).name for x in r["reports"] if x["file"].endswith(".docx")]
     assert names == ["Wind_Resource_Analysis_Demo_Ridge_invented_data.docx", "Project_Wind_Summary_Demo_Ridge_invented_data.docx"]
     assert any("Micrositing" in s and "step 4" in s for s in r["reports_skipped"])
     text = _text(project.folder / r["reports"][0]["file"])
@@ -101,7 +101,8 @@ def test_the_whole_chain_leaves_three_reports_and_two_google_earth_files(project
     lay = project.result("layout")
     z = zipfile.ZipFile(project.folder / lay["kmz"])
     assert z.read("doc.kml").decode("utf-8").count("#turbine") == lay["n_placed"]
-    reports = {Path(x["file"]).name.split("_Demo")[0]: project.folder / x["file"] for x in project.result("environment")["reports"]}
+    reports = {Path(x["file"]).name.split("_Demo")[0]: project.folder / x["file"] for x in project.result("environment")["reports"]
+               if x["file"].endswith(".docx")}
     assert set(reports) == {"Wind_Resource_Analysis", "Micrositing", "Project_Wind_Summary"}
     wra, mic, summ = (_text(reports[k]) for k in ("Wind_Resource_Analysis", "Micrositing", "Project_Wind_Summary"))
     lt = project.result("longterm")
@@ -128,3 +129,24 @@ def test_a_report_that_cannot_be_written_never_stops_a_step(project, monkeypatch
     monkeypatch.setattr(kit, "available", lambda: False)
     out = build.write_all(project, log=lambda m: None)
     assert out["files"] == [] and "python-docx" in out["skipped"][0]
+
+
+def test_pdf_copies_come_from_a_program_of_the_computer_or_not_at_all(tmp_path, monkeypatch):
+    from bohemian_wind.reports import pdf
+    monkeypatch.delenv("BW_NO_PDF", raising=False)
+    doc = kit.Report("Wind Resource Analysis", "Invented", "BR-TEST")
+    doc.h1("One")
+    doc.p("Text.")
+    f = doc.save(tmp_path / "it's a report.docx")
+    script = pdf.word_script([f])
+    assert "it''s a report.docx" in script and "ExportAsFixedFormat" in script and "$w.Quit()" in script   # a quote in a name is doubled
+    said = []
+    if pdf.find_libreoffice():
+        made = pdf.convert([f], log=said.append)
+        assert made == [f.with_suffix(".pdf")] and made[0].read_bytes()[:5] == b"%PDF-" and not said
+    monkeypatch.setattr(pdf, "find_libreoffice", lambda: None)
+    monkeypatch.setattr(pdf.os, "name", "posix")
+    f.with_suffix(".pdf").unlink(missing_ok=True)
+    assert pdf.convert([f], log=said.append) == [] and "neither LibreOffice nor Microsoft Word" in said[-1]
+    monkeypatch.setenv("BW_NO_PDF", "1")
+    assert pdf.convert([f], log=said.append) == [] and len(said) == 1

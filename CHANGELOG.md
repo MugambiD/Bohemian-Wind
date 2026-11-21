@@ -6,6 +6,14 @@ What changed in each version of Bohemian Wind. The format follows [Keep a Change
 
 ## [Unreleased]
 
+## [0.3.1-dev] - 2026-11-21
+
+### Added
+- A second long-term reference in step 2: a point time series of another reanalysis from a file of your own (for example the ERA5 hourly time series of the Copernicus Climate Data Store as CSV, with the 100 m wind components; its zip is read as it comes). The correction is made again with it over the same long-term years, and the two long-term means are set side by side. The first reference's mean is still the one carried forward.
+- With a second reference, the uncertainty's fixed 3 % line for "one reanalysis, not checked against a second" gives way to half the distance between the two long-term means, and never less than 1 %. Two references that disagree by more than 5 % raise a caution.
+- Wind resource analysis report: tower shading by level (the ratio of the two anemometers of a level by wind direction, with the wake seen in the data marked), each measured height against the one below it record by record, and the two references side by side.
+- PDF copies beside the Word reports, made by LibreOffice or, on Windows, by Microsoft Word when the computer has one of them. With neither, the step says so and the Word reports stand alone.
+
 ## [0.3.0-dev] - 2026-11-21
 
 ### Added
@@ -108,7 +116,8 @@ What changed in each version of Bohemian Wind. The format follows [Keep a Change
 
 Before 0.2.0-dev, Bohemian Wind was a stand-alone data-check window (`qc_main.py`, still included). Its history is not in this repository.
 
-[Unreleased]: https://github.com/MugambiD/bohemian-wind/compare/v0.3.0-dev...HEAD
+[Unreleased]: https://github.com/MugambiD/bohemian-wind/compare/v0.3.1-dev...HEAD
+[0.3.1-dev]: https://github.com/MugambiD/bohemian-wind/releases/tag/v0.3.1-dev
 [0.3.0-dev]: https://github.com/MugambiD/bohemian-wind/releases/tag/v0.3.0-dev
 [0.2.7-dev]: https://github.com/MugambiD/bohemian-wind/releases/tag/v0.2.7-dev
 [0.2.6-dev]: https://github.com/MugambiD/bohemian-wind/releases/tag/v0.2.6-dev

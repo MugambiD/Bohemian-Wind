@@ -86,19 +86,33 @@ class Source:
         return None
 
     @property
-    def speeds(self):
-        """The valid wind speeds at the top height, when the run kept its time series."""
+    def series(self):
+        """The valid wind speeds by height (columns ws_<height>m), when the run kept its time series; else None."""
         if self._speeds is False:
             self._speeds = None
             f = self.run_dir / "timeseries_by_height.csv" if self.run_dir else None
             if f and f.is_file() and self.clim:
                 try:
                     import pandas as pd  # noqa: PLC0415
-                    col = f"ws_{self.clim['height_m']:g}m"
-                    self._speeds = pd.read_csv(f, usecols=[col])[col].dropna().to_numpy()
+                    self._speeds = pd.read_csv(f, usecols=lambda c: str(c).startswith("ws_"))
                 except Exception:  # noqa: BLE001
                     self._speeds = None
         return self._speeds
+
+    @property
+    def speeds(self):
+        """The valid wind speeds at the top height."""
+        s, col = self.series, f"ws_{self.clim['height_m']:g}m" if self.clim else ""
+        return s[col].dropna().to_numpy() if s is not None and col in s.columns else None
+
+    def pairs(self) -> list:
+        """(height, table) of every level with two anemometers: their median ratio by direction."""
+        out = []
+        for name, df in self.sheets.items():
+            m = re.match(r"Pair ([\d.]+) m", name)
+            if m and len(df):
+                out.append((float(m.group(1)), df))
+        return sorted(out, key=lambda x: -x[0])
 
     def alpha(self):
         try:
@@ -129,6 +143,19 @@ class Source:
         return rows
 
 
+def _ref_pct(src: Source) -> float:
+    """The reference term of the wind speed uncertainty: fixed with one reanalysis, from their distance with two."""
+    from ..energy import budget  # noqa: PLC0415
+    return budget.reference_pct(((src.lt or {}).get("second") or {}).get("difference_pct"))
+
+
+def _second_rows(lt: dict) -> list:
+    s = lt["second"]
+    return [["First: " + lt.get("credit", "").split(": ", 1)[-1].rstrip("."), f"{lt['factor']:.3f}", f"{lt['long_term']:.2f}", f"{lt['r']:.2f}",
+             f"{lt['lt_years'][0]} to {lt['lt_years'][1]}"],
+            ["Second: " + s["what"].split(":")[0], f"{s['factor']:.3f}", f"{s['long_term']:.2f}", f"{s['r']:.2f}", f"{s['lt_years'][0]} to {s['lt_years'][1]}"]]
+
+
 def _hub_table(src: Source) -> list:
     """Long-term mean by hub height with the wind speed uncertainty the energy step would use (1 sigma)."""
     from ..energy import budget  # noqa: PLC0415
@@ -143,7 +170,7 @@ def _hub_table(src: Source) -> list:
     rows = []
     for h in sorted(set(HUB_HEIGHTS) | {top}):
         v = budget.vertical_pct(h, top, clean)
-        terms = [budget.DEFAULT_SPEED_UNCERTAINTY[budget.MEASUREMENT], ltp, v] + ([budget.REFERENCE_PCT] if src.lt else [])
+        terms = [budget.DEFAULT_SPEED_UNCERTAINTY[budget.MEASUREMENT], ltp, v] + ([_ref_pct(src)] if src.lt else [])
         total = sum(t * t for t in terms) ** 0.5
         rows.append([f"{h:g} m" + (" (top anemometer)" if h == top else ""), f"{mean * (h / top) ** alpha:.2f}", f"{v:.1f}", f"{total:.1f}"])
     return rows
@@ -295,6 +322,33 @@ def wind_resource(project, path, date: datetime | None = None) -> Path:
                                                          for k in keys] for r in fl], caption="Records flagged by each check, by sensor",
                   size=7, widths=[3.4] + [1.25] * (len(keys) - 1))
     doc.figure(fg.recovery(src.sheet("Recovery % by month")), "Valid data by sensor and month")
+    pairs = src.pairs()
+    if pairs:
+        doc.h2("Tower shading by level")
+        doc.p("Where a level carries two anemometers on opposite booms, their ratio by wind direction shows the mast's wake: the "
+              "ratio leaves 1 in the directions where one of them stands behind the mast. In those directions the anemometer in "
+              "the free wind is used; elsewhere the two are averaged.")
+        wake = src.sheet("Mast wake")
+        for h, df in pairs:
+            marks = []
+            if wake is not None and "height_m" in wake.columns and "observed_wake_deg" in wake.columns:
+                for _, w in wake[wake["height_m"] == h].iterrows():
+                    marks.append((w.get("observed_wake_deg"), f"{w.get('cup', '')} in the wake"))
+            doc.figure(fg.shading(df, h, marks), f"Tower shading at {h:g} m: ratio of the two anemometers by wind direction")
+        if wake is not None:
+            head, rws = _df_rows(wake, ["cup", "height_m", "boom_bearing_deg", "expected_wake_deg", "observed_wake_deg", "wake_deficit_%",
+                                        "implied_boom_bearing_deg", "verdict"], nd=1)
+            doc.table(head, rws, caption="Mast wake seen in the data, by anemometer", size=7.5, widths=[3.4] + [1.8] * (len(head) - 1))
+    ser = src.series
+    if ser is not None and ser.shape[1] >= 2:
+        doc.h2("Height against height")
+        doc.p("Each measured height set against the one below it, record by record. A tight cloud along a straight line says the "
+              "two levels saw the same wind; the ratio is the mean shear between them.")
+        cols = sorted(ser.columns, key=lambda c: -float(re.sub(r"[^\d.]", "", c) or 0))
+        for a, b in zip(cols[:-1], cols[1:]):
+            ha, hb = (re.sub(r"[^\d.]", "", c) for c in (a, b))
+            doc.figure(fg.scatter(ser[b], ser[a], f"Wind speed at {hb} m, m/s", f"Wind speed at {ha} m, m/s"),
+                       f"Wind speed at {ha} m against {hb} m, ten-minute records", 9.0)
     hs = src.sheet("Heights")
     if hs is not None:
         head, rws = _df_rows(hs, ["height_m", "valid_records", "recovery_%", "mean_all_valid", "mean_ws", "momm_months_70pct", "momm_ws",
@@ -357,6 +411,16 @@ def wind_resource(project, path, date: datetime | None = None) -> Path:
                 ("Long-term factor", f"{lt['factor']:.3f}"), (f"Long-term mean at {lt['height_m']:g} m", f"{lt['long_term']:.2f} m/s")],
                caption="Long-term correction")
         doc.figure(fg.correlation(lt.get("monthly"), lt.get("r")), "Monthly means of the mast against the reference", 10.5)
+        if lt.get("second"):
+            s2 = lt["second"]
+            doc.h2("A second reference")
+            doc.p(f"The correction was made again with a second, independent reanalysis series ({s2['what']}). It puts the long-term mean at "
+                  f"{s2['long_term']:.2f} m/s, {s2['difference_pct']:+.1f} % from the first. The first reference's mean is the one carried "
+                  f"forward; the mean of the two would be {s2['mean_of_two']:.2f} m/s. The distance between them sets the reference term of "
+                  f"the uncertainty: {_ref_pct(src):.1f} % of the wind speed.")
+            doc.table(["Reference", "Long-term factor", f"Long-term mean at {lt['height_m']:g} m, m/s", "Monthly r", "Long-term years"],
+                      _second_rows(lt), widths=[6.4, 2.2, 3.0, 1.8, 2.5], caption="The two long-term references side by side")
+            doc.figure(fg.correlation(s2.get("monthly"), s2.get("r")), "Monthly means of the mast against the second reference", 10.5)
         v = lt.get("vane_check")
         if v:
             doc.p(f"Vane north check: on {v['days']} days with {v['min_ws']:g} m/s or more, the direction at {v['height_m']:g} m runs "
@@ -364,7 +428,9 @@ def wind_resource(project, path, date: datetime | None = None) -> Path:
                   + (f" {v['caution']}" if v.get("caution") else ""))
         if lt.get("cautions"):
             doc.flag(lt["cautions"], label="Check:")
-        doc.note("One reanalysis is one view of the long term. The correction was not checked against a second reference or a "
+        doc.note("Two reanalyses share many of their observations, so their agreement narrows the doubt without removing it. No nearby "
+                 "long-term station was used." if lt.get("second") else
+                 "One reanalysis is one view of the long term. The correction was not checked against a second reference or a "
                  "nearby long-term station; the uncertainty carries a term for this.")
     else:
         doc.flag("No long-term correction has been made (step 2 has not been run, or is out of date). The figures of this report are "
@@ -404,7 +470,8 @@ def wind_resource(project, path, date: datetime | None = None) -> Path:
     urows = [["Measurement", f"{budget.DEFAULT_SPEED_UNCERTAINTY[budget.MEASUREMENT]:.1f}", "one mast: sensors, mounting, data recovery"],
              ["Long-term correction", f"{ltp:.1f}", why]]
     if lt:
-        urows.append(["Long-term reference", f"{budget.REFERENCE_PCT:.1f}", "one reanalysis, not checked against a second"])
+        urows.append(["Long-term reference", f"{_ref_pct(src):.1f}", "half the distance between the two references' long-term means, at least "
+                      f"{budget.REFERENCE_TWO_FLOOR_PCT:g} %" if lt.get("second") else "one reanalysis, not checked against a second"])
     urows.append(["Vertical extrapolation", "by height", f"{budget.V_BASE_PCT:g} % within the measured heights, more for every 10 m above the top anemometer"])
     doc.table(["Term", "% of wind speed", "Basis"], urows, widths=[4.2, 2.6, 9.1], caption="Uncertainty terms of the wind speed at the mast")
 
@@ -422,7 +489,8 @@ def wind_resource(project, path, date: datetime | None = None) -> Path:
         "Mounting: boom lengths, orientations and the mast's cross-section were not reviewed against the measurement standard. Where a "
         "height has two anemometers, the one out of the mast's wake is used by direction; no further flow-distortion correction is applied.",
         "Site visit: the analysis rests on the files alone. The installation report and the maintenance log were not reviewed here.",
-        "Long term: one reanalysis reference and one monthly method; no second reference, no nearby long-term station.",
+        ("Long term: two reanalysis references and one monthly method; no nearby long-term station." if (lt or {}).get("second") else
+         "Long term: one reanalysis reference and one monthly method; no second reference, no nearby long-term station."),
         "Uncertainty: working assumptions by term, not a certificate-based budget.",
         "Review: generated by software and not yet reviewed by a second person (see document control).",
     ])
@@ -650,6 +718,9 @@ def summary(project, path, date: datetime | None = None) -> Path:
         doc.p(f"Set against {lt.get('credit', 'a reanalysis reference').split(': ', 1)[-1].rstrip('.')} for {lt['lt_years'][0]} to {lt['lt_years'][1]}, the measured months "
               f"were {abs(100 * (1 / lt['factor'] - 1)):.1f} % {'windier' if lt['factor'] < 1 else 'calmer'} than the long term. The long-term factor is "
               f"{lt['factor']:.3f} (monthly correlation r = {lt['r']:.2f}, {lt['months']} months), giving {lt['long_term']:.2f} m/s at {lt['height_m']:g} m.")
+        if lt.get("second"):
+            doc.p(f"A second reference ({lt['second']['what'].split(':')[0]}) gives {lt['second']['long_term']:.2f} m/s, "
+                  f"{lt['second']['difference_pct']:+.1f} % from the first.")
         if lt.get("cautions"):
             doc.flag(lt["cautions"], label="Check:")
     else:
@@ -734,5 +805,9 @@ def write_all(project, log=print, date: datetime | None = None) -> dict:
             out["skipped"].append(f"{label} not written: {e}")
             log(out["skipped"][-1])
     if out["files"]:
+        from . import pdf  # noqa: PLC0415
+        made = {p.stem for p in pdf.convert([project.folder / x["file"] for x in out["files"]], log=log)}
+        out["files"] += [{"file": str(Path(x["file"]).with_suffix(".pdf").as_posix()), "what": x["what"]}
+                         for x in list(out["files"]) if Path(x["file"]).stem in made]
         log("Reports: " + ", ".join(Path(x["file"]).name for x in out["files"]) + " in reports/.")
     return out

@@ -39,6 +39,7 @@ LONG_TERM = "Long-term correction (one reanalysis index)"
 REFERENCE = "Long-term reference (one reanalysis, not checked against a second)"
 VERTICAL = "Vertical extrapolation from the mast top to hub height"
 HORIZONTAL = "Horizontal extrapolation from the mast to the turbines (screening flow model)"
+REFERENCE_TWO = "Long-term reference (two reanalyses compared)"
 DEFAULT_SPEED_UNCERTAINTY = {
     MEASUREMENT: 2.5,
     LONG_TERM: 3.0,
@@ -56,6 +57,19 @@ LT_UNCORRECTED_PART_YEAR_PCT = ((6, 12.0), (0, 20.0))
 # One reanalysis is one view of the long term, and two can disagree by more than the correction term allows. Until
 # the tool checks against a second reanalysis this line stays in.
 REFERENCE_PCT = 3.0
+
+# With a second reanalysis the fixed line gives way to what the two say: half the distance between their long-term
+# means, and never less than the floor (two reanalyses share much of their observations, so agreeing is not proof).
+REFERENCE_TWO_FLOOR_PCT = 1.0
+
+
+def reference_pct(difference_pct: float | None) -> float:
+    """1 sigma, per cent of wind speed, for the choice of long-term reference. difference_pct: how far the second
+    reference's long-term mean lies from the first's (None: there is no second)."""
+    if difference_pct is None:
+        return REFERENCE_PCT
+    return max(REFERENCE_TWO_FLOOR_PCT, abs(float(difference_pct)) / 2.0)
+
 
 # How far the mast's wind can be carried, 1 sigma in per cent of wind speed. Developer assumptions for a screening
 # flow model, not values from a standard; edit them here. A turbine next to the mast still carries H_BASE.
@@ -175,6 +189,9 @@ def speed_terms_for(long_term: dict | None = None) -> dict:
         terms[LONG_TERM] = float(long_term["pct"])
         if not long_term.get("corrected", True):
             terms.pop(REFERENCE, None)
+        elif long_term.get("reference_pct") is not None:           # a second reanalysis was set beside the first
+            terms.pop(REFERENCE, None)
+            terms[REFERENCE_TWO] = float(long_term["reference_pct"])
     return terms
 
 

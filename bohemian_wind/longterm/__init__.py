@@ -174,6 +174,94 @@ def read_power(monthly_path, daily_path=None) -> pd.Series:
     return s
 
 
+TIME_NAMES = ("valid_time", "time", "datetime", "date", "timestamp")
+SPEED_NAMES = ("wind_speed_100m", "ws100", "ws100m", "wind_speed", "windspeed", "ws", "speed", "ws50m", "si100", "si10")
+PAIR_NAMES = (("u100", "v100"), ("100m_u_component_of_wind", "100m_v_component_of_wind"), ("u10", "v10"),
+              ("10m_u_component_of_wind", "10m_v_component_of_wind"), ("u", "v"))
+SECOND_MONTH_SHARE = 0.95      # a month of the second reference counts when this share of its time steps is there
+
+
+def read_reference_file(path) -> tuple:
+    """A reference series from a table of your own: (monthly means as a period-indexed Series, what was read).
+
+    For a second view of the long term beside NASA POWER: a point time series of another reanalysis, such as the
+    ERA5 hourly time series of the Copernicus Climate Data Store saved as CSV (its zip is read as it comes). The
+    table needs a time column and either a wind speed column or the two wind components (u and v), hourly, daily or
+    monthly. Lines starting with # are skipped. Only complete months are used."""
+    import io  # noqa: PLC0415
+    import zipfile  # noqa: PLC0415
+    p = Path(path)
+    if not p.is_file():
+        raise ValueError(f"the second reference file was not found: {p}")
+    name = p.name
+    if p.suffix.lower() == ".zip":
+        with zipfile.ZipFile(p) as z:
+            inner = [n for n in z.namelist() if n.lower().endswith((".csv", ".txt"))]
+            if len(inner) != 1:
+                raise ValueError(f"{p.name} holds {len(inner)} CSV files; it should hold one")
+            raw, name = z.read(inner[0]), f"{p.name} ({inner[0]})"
+    else:
+        raw = p.read_bytes()
+    try:
+        df = pd.read_csv(io.BytesIO(raw), comment="#", sep=None, engine="python")
+    except Exception as e:  # noqa: BLE001
+        raise ValueError(f"{p.name} could not be read as a table ({e})") from e
+    cols = {str(c).strip().lower(): c for c in df.columns}
+    tcol = next((cols[n] for n in TIME_NAMES if n in cols), None)
+    if tcol is None:
+        raise ValueError(f"{p.name} has no time column (looked for: {', '.join(TIME_NAMES)})")
+    when = pd.to_datetime(df[tcol], errors="coerce", utc=True).dt.tz_localize(None)
+    pair = next(((cols[a], cols[b]) for a, b in PAIR_NAMES if a in cols and b in cols), None)
+    scol = next((cols[n] for n in SPEED_NAMES if n in cols), None)
+    if pair is not None:
+        speed = np.hypot(pd.to_numeric(df[pair[0]], errors="coerce"), pd.to_numeric(df[pair[1]], errors="coerce"))
+        what = f"wind speed from the components {pair[0]} and {pair[1]}"
+    elif scol is not None:
+        speed = pd.to_numeric(df[scol], errors="coerce")
+        what = f"wind speed column {scol}"
+    else:
+        raise ValueError(f"{p.name} has neither a wind speed column nor the two wind components "
+                         f"(looked for: {', '.join(SPEED_NAMES[:5])} ...; u100 and v100 ...)")
+    s = pd.Series(np.asarray(speed, dtype=float), index=pd.DatetimeIndex(when)).dropna()
+    s = s[s.index.notna()].sort_index()
+    s = s[~s.index.duplicated()]
+    if len(s) < 12:
+        raise ValueError(f"{p.name} holds {len(s)} usable values: too few for a reference")
+    step = float(np.median((s.index[1:] - s.index[:-1]).total_seconds())) / 3600.0      # hours between values
+    g = s.groupby(s.index.to_period("M"))
+    if step >= 24 * 27:                                                  # already monthly
+        monthly, kind = g.mean(), "monthly values"
+    else:
+        expected = pd.Series({m: m.days_in_month * 24.0 / step for m in g.groups}, dtype=float)
+        monthly = g.mean()[g.count() >= SECOND_MONTH_SHARE * expected]
+        kind = "hourly values" if step <= 1.01 else "daily values" if abs(step - 24) < 0.5 else f"values every {step:g} hours"
+    if len(monthly) < 24:
+        raise ValueError(f"{p.name} gives {len(monthly)} complete months: a reference needs years")
+    return monthly.sort_index(), f"{name}: {what}, {kind}, {monthly.index[0]} to {monthly.index[-1]}"
+
+
+def second_reference(clim: dict, ref2: pd.Series, primary: dict, what: str) -> dict:
+    """The long-term correction made again with a second reference, set beside the first: the two factors, the
+    two long-term means and how far apart they are. The same long-term years are used when the second reference
+    covers them, so that the two answer the same question."""
+    y0, y1 = primary["lt_years"]
+    counts = ref2.groupby(ref2.index.year).count()
+    same = all(int(counts.get(y, 0)) == 12 for y in range(int(y0), int(y1) + 1))
+    res = correct(clim, ref2, (int(y0), int(y1)) if same else None)
+    diff = 100.0 * (res["long_term"] / primary["long_term"] - 1.0)
+    out = {"what": what, "factor": res["factor"], "long_term": res["long_term"], "r": res["r"], "months": res["months"],
+           "lt_years": list(res["lt_years"]), "same_years": bool(same), "difference_pct": float(diff),
+           "mean_of_two": float((res["long_term"] + primary["long_term"]) / 2.0),
+           "monthly": res["monthly"], "cautions": []}
+    if not same:
+        out["cautions"].append(f"The second reference does not cover every year of {y0} to {y1}; its own years "
+                               f"{res['lt_years'][0]} to {res['lt_years'][1]} were used, so the two are not on the same footing.")
+    if abs(diff) > 5.0:
+        out["cautions"].append(f"The two long-term references disagree by {abs(diff):.1f} % on the long-term mean wind speed. "
+                               "Find out why (a station change, a trend in one of them) before relying on either.")
+    return out
+
+
 def default_years(ref: pd.Series, n: int = LT_YEARS) -> tuple:
     """The last n complete calendar years of the reference."""
     counts = ref.groupby(ref.index.year).count()

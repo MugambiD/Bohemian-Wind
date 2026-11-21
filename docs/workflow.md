@@ -50,6 +50,9 @@ Every data check and every permitting pack is written to a folder of its own. A 
 
 **Stops at.** One reference and one method. With fewer than 12 calendar months measured the factor is marked indicative. No uncertainty is derived from the correlation; the budget in step 4 sets the long-term term by what the campaign covers (see step 4) and adds a line for relying on one reanalysis.
 
+
+**A second reference.** One reanalysis is one view of the long term. Give step 2 a second one as a file and the correction is made again with it, over the same long-term years: the step shows both factors and both long-term means and how far apart they are. The file is a table with a time column and either a wind speed column or the two wind components (u and v), hourly, daily or monthly; the ERA5 hourly time series of the Copernicus Climate Data Store for the mast's position, saved as CSV with the 100 m wind components, is read as it comes (zip included). Only complete months count. The first reference's mean is still the one carried forward: the second is a check, not an average. In the uncertainty, the fixed line for a single reference (3 % of wind speed) gives way to half the distance between the two means, never less than 1 %: two reanalyses share many observations, so agreement narrows the doubt without removing it. More than 5 % apart, the step raises a caution. Credit the second reference as its provider asks (ERA5: Copernicus Climate Change Service, CC BY 4.0).
+
 ## 3. Wind map
 
 **Does.** Builds a local metric grid round the mast from SRTM terrain (50 m cells by default) and carries the mast's sector climate across it:
@@ -97,6 +100,8 @@ Every data check and every permitting pack is written to a folder of its own. A 
 **A Google Earth file.** Step 3 writes `maps/wind_map.kmz` and step 4 writes `layout/layout.kmz`. Open either in Google Earth: the wind map lies over the ground in its wind speed classes; beside it stand the key to the classes, a sign with the height and the energy rose of the mast. The mast, the edge of the area mapped and, in the layout's file, every turbine with its figures can be clicked. The classes are fixed (below 5 m/s, then steps of 0.5, 0.25 and, between 6 and 11 m/s, 0.2 m/s, up to 13 m/s and above), so the colours mean the same wind on every site.
 
 **Three Word reports**, in `reports/`, in the Bohemian Renewables house template: a *wind resource analysis* of the measurement, a *micrositing and energy estimate* of the layout, and a *project wind summary* that ties both together. Steps 1, 2, 4, 5 and 6 write them again from the results the project holds at that moment, so they never lag behind the screen. A report whose step has not been run yet is left out: after step 1 there is a wind resource analysis and a summary, the micrositing report comes with step 4. Close a report in Word before running a step, or that one cannot be written over (the step says so and carries on).
+
+**PDF copies.** Where the computer has LibreOffice, or Microsoft Word on Windows, each report is also saved as a PDF beside it. Bohemian Wind does not lay out pages itself and installs nothing for this: with neither program, the step says so and the Word reports stand alone.
 
 The reports set out what the steps computed and nothing more. Every one carries the notice that it is a developer estimate, lists where the analysis departs from usual practice, and leaves the "Reviewed" and "Approved" fields of its document control empty for a person to fill.
 

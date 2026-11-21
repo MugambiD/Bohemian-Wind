@@ -220,7 +220,7 @@ def design(field: WindField, clim: dict, mask: np.ndarray, turbine: Turbine, n_t
                               "steep_share_mast_pct": round(steep_mast, 1), "turbines_complex": n_complex,
                               "long_term_pct_ws": speed_terms.get(budget.LONG_TERM),
                               "long_term_basis": (long_term or {}).get("basis", ""),
-                              "reference_pct_ws": speed_terms.get(budget.REFERENCE)}
+                              "reference_pct_ws": speed_terms.get(budget.REFERENCE, speed_terms.get(budget.REFERENCE_TWO))}
         if not profile_clean and turbine.hub_m > top:
             notes.append(f"The measured wind profile is not clean (see the shear warning), so carrying the wind from the top "
                          f"anemometer at {top:g} m to the {turbine.hub_m:g} m hub is taken as {budget.V_BASE_PCT:g} % plus "

@@ -59,7 +59,7 @@ def _feed_longterm(s: dict) -> dict:
     cfg = s["longterm"]
     by_file = cfg.get("source") == "file"          # the files count only when the reference is read from them
     return {"source": "file" if by_file else "download", "monthly_file": cfg.get("monthly_file") if by_file else None,
-            "daily_file": cfg.get("daily_file") if by_file else None}
+            "daily_file": cfg.get("daily_file") if by_file else None, "second_file": cfg.get("second_file") or None}
 
 
 def _feed_map(s: dict) -> dict:
@@ -169,7 +169,7 @@ def defaults() -> dict:
                  # periods a logger's clock was wrong, as written: [{"from": "2025-03-10 14:40", "to": "2025-04-02 09:10",
                  # "minutes": 60, "program": "<logger program, optional>", "note": "why"}]
                  "clock_corrections": []},
-        "longterm": {"source": "power", "monthly_file": "", "daily_file": ""},
+        "longterm": {"source": "power", "monthly_file": "", "daily_file": "", "second_file": ""},
         # 50 m cells: on a real ridge the crests were narrower than 100 m cells, and a layout lost several per cent of its energy
         "map": {"engine": "linear", "height_m": 120.0, "half_km": 8.0, "res_m": 50.0, "z0_m": 0.05, "gwa_dir": "",
                 # CFD cell size over the map: quick 200 m, standard 100 m, fine 50 m (bohemian_wind.flow.cfd)
@@ -577,7 +577,13 @@ class Project:
             series = _climate.monthly_series(clim)
             cal, months = len(set(series.index.month)), len(series)
         pct, why = budget.long_term_pct(cal, corrected, months)
-        return {"pct": pct, "corrected": corrected, "basis": why}
+        out = {"pct": pct, "corrected": corrected, "basis": why}
+        second = lt.get("second") if corrected else None
+        if second:
+            out["reference_pct"] = budget.reference_pct(second["difference_pct"])
+            out["basis"] += (f"; a second reference puts the long-term mean {second['difference_pct']:+.1f} % from the first, "
+                             f"so the choice of reference counts {out['reference_pct']:.1f} %")
+        return out
 
     def turbine(self):
         from .energy.turbine import PRESETS, Turbine  # noqa: PLC0415
@@ -885,6 +891,13 @@ class Project:
         except (ValueError, KeyError) as e:
             raise ProjectError(f"The long-term correction could not be made: {e}") from e
         res["reference_first"], res["reference_last"] = str(ref.index[0]), str(ref.index[-1])
+        if cfg.get("second_file"):                 # a second view of the long term, set beside the first
+            try:
+                ref2, what = longterm.read_reference_file(self.resolve(cfg["second_file"]))
+                res["second"] = longterm.second_reference(clim, ref2, res, what)
+            except (ValueError, KeyError) as e:
+                raise ProjectError(f"The second long-term reference could not be used: {e}. Take the file out of the "
+                                   "settings to run without it.") from e
         res["measured_height_m"] = clim["height_m"]
         res["vane_check"] = longterm.vane_check(clim, files.get("measured"), self.vane_offset()[0])
         res["reference_air"] = longterm.reference_air(files["monthly"], *(res.get("lt_years") or (None, None)))
@@ -893,6 +906,11 @@ class Project:
         self.path("longterm", "longterm.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
         log(f"Long-term factor {res['factor']:.3f}: {res['measured']:.2f} m/s measured becomes {res['long_term']:.2f} m/s "
             f"at {clim['height_m']:g} m (monthly correlation r = {res['r']:.2f}, {res['months']} months).")
+        if res.get("second"):
+            s2 = res["second"]
+            res["cautions"] += s2["cautions"]
+            log(f"Second reference: factor {s2['factor']:.3f}, long-term mean {s2['long_term']:.2f} m/s "
+                f"({s2['difference_pct']:+.1f} % from the first; monthly correlation r = {s2['r']:.2f}).")
         if res["vane_check"]:
             v = res["vane_check"]
             log(f"Vane north check: the direction at {v['height_m']:g} m runs {v['median_deg']:+.0f} degrees from the "

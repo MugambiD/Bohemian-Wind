@@ -35,7 +35,7 @@ TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
          ".log": "text/plain; charset=utf-8", ".kml": "application/vnd.google-earth.kml+xml",
          ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
          ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-         ".kmz": "application/vnd.google-earth.kmz"}
+         ".kmz": "application/vnd.google-earth.kmz", ".pdf": "application/pdf"}
 CSP = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'"
 PICKER = r'''
 import sys, tkinter as tk

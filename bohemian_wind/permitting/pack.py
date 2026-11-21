@@ -153,7 +153,7 @@ def build(project, log=print) -> dict:
     try:                                         # the Word reports, written afresh from the results the pack stands on
         from ..reports import build as _reports  # noqa: PLC0415
         for r in _reports.write_all(project, log=log)["files"]:
-            shutil.copyfile(project.folder / r["file"], put(Path(r["file"]).name, f"{r['what']} (Word)"))
+            shutil.copyfile(project.folder / r["file"], put(Path(r["file"]).name, f"{r['what']} ({'PDF' if r['file'].lower().endswith('.pdf') else 'Word'})"))
     except Exception as e:  # noqa: BLE001
         log(f"Reports not added to the pack: {e}")
     if LOGO.is_file():
