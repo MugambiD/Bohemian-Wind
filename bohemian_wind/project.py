@@ -763,11 +763,20 @@ class Project:
     def _kmz(self, fname: str, wf, height: float, turbines: list | None = None, log=print) -> str | None:
         """The wind field as a Google Earth file in the project folder; never stops a step."""
         try:
-            from . import kmz  # noqa: PLC0415
+            from . import kmz, terrain  # noqa: PLC0415
             clim, site = self.climate(), self.site()
             scale = self.speed_scale(clim)["scale"]
             facts, lines = kmz.mast_facts(self.s["name"], site, clim, self.result("longterm") if not self.stale_reason("longterm") else None,
                                           height, wf.engine, wf.grid.res, wf.grid.source or "")
+            credits = [terrain.TERRAIN_CREDIT] if "SRTM" in (wf.grid.source or "") else []      # the file travels alone: it names its sources
+            if wf.engine == "atlas":
+                from .flow import fields  # noqa: PLC0415
+                credits.append(fields.GWA_CREDIT)
+            if wf.engine == "cfd":
+                from .flow import cfd  # noqa: PLC0415
+                credits.append(cfd.CREDIT)
+            if credits:
+                facts.append(("Data sources", " ".join(credits)))
             rho = (clim.get("density") or {}).get("mean") or 1.225
             note = ""
             if turbines:

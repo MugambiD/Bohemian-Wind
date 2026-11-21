@@ -86,7 +86,7 @@ def _text(path) -> str:
 def test_after_step_1_the_wind_resource_report_is_written_and_the_micrositing_report_waits(project):
     r = project.result("data")
     names = [Path(x["file"]).name for x in r["reports"]]
-    assert names == ["Wind_Resource_Analysis_Demo_Ridge_Invented_Data.docx", "Project_Wind_Summary_Demo_Ridge_Invented_Data.docx"]
+    assert names == ["Wind_Resource_Analysis_Demo_Ridge_invented_data.docx", "Project_Wind_Summary_Demo_Ridge_invented_data.docx"]
     assert any("Micrositing" in s and "step 4" in s for s in r["reports_skipped"])
     text = _text(project.folder / r["reports"][0]["file"])
     assert kit.NOTICE in text and "No long-term correction has been made" in text
@@ -96,7 +96,8 @@ def test_after_step_1_the_wind_resource_report_is_written_and_the_micrositing_re
 def test_the_whole_chain_leaves_three_reports_and_two_google_earth_files(project):
     for step in ("longterm", "map", "layout", "environment", "pack"):
         project.run(step, log=lambda m: None)
-    assert (project.folder / project.result("map")["kmz"]).is_file()
+    kml = zipfile.ZipFile(project.folder / project.result("map")["kmz"]).read("doc.kml").decode("utf-8")
+    assert "Flow model" in kml and "own linear flow model" in kml
     lay = project.result("layout")
     z = zipfile.ZipFile(project.folder / lay["kmz"])
     assert z.read("doc.kml").decode("utf-8").count("#turbine") == lay["n_placed"]

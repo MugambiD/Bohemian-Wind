@@ -721,7 +721,7 @@ def write_all(project, log=print, date: datetime | None = None) -> dict:
         log(out["skipped"][-1])
         return out
     date = date or datetime.now()
-    slug = _slug(project.s["name"]).title().replace("-", "_")
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", project.s["name"]).strip("_")[:40] or "project"
     for label, fn, fname in (("Wind resource analysis", wind_resource, f"Wind_Resource_Analysis_{slug}.docx"),
                              ("Micrositing report", micrositing, f"Micrositing_{slug}.docx"),
                              ("Project wind summary", summary, f"Project_Wind_Summary_{slug}.docx")):
