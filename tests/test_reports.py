@@ -145,8 +145,9 @@ def test_pdf_copies_come_from_a_program_of_the_computer_or_not_at_all(tmp_path, 
         made = pdf.convert([f], log=said.append)
         assert made == [f.with_suffix(".pdf")] and made[0].read_bytes()[:5] == b"%PDF-" and not said
     monkeypatch.setattr(pdf, "find_libreoffice", lambda: None)
-    monkeypatch.setattr(pdf.os, "name", "posix")
+    monkeypatch.setattr(pdf, "_with_word", lambda files: None)            # a computer whose Word writes nothing, or that has none
     f.with_suffix(".pdf").unlink(missing_ok=True)
-    assert pdf.convert([f], log=said.append) == [] and "neither LibreOffice nor Microsoft Word" in said[-1]
+    assert pdf.convert([f], log=said.append) == []
+    assert "neither LibreOffice nor Microsoft Word" in said[-1] or "Microsoft Word did not write them" in said[-1]
     monkeypatch.setenv("BW_NO_PDF", "1")
     assert pdf.convert([f], log=said.append) == [] and len(said) == 1
