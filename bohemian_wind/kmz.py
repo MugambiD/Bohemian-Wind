@@ -218,10 +218,12 @@ def mast_facts(name: str, site: dict, clim: dict, longterm: dict | None, height_
             else f"{(clim.get('momm_ws') or clim['mean_ws']):.2f} m/s at {clim['height_m']:g} m, measured period")
     how = {"linear": "own linear flow model", "atlas": "Global Wind Atlas pattern scaled to the mast",
            "cfd": "CFD screening run (OpenFOAM, steady RANS)"}.get(engine, engine)
+    # the atlas is drawn on the map's grid but knows no more than its own cells of about 250 m
+    cells = f"{cell_m:g} m drawing grid; the atlas's own cells are about 250 m" if engine == "atlas" else f"{cell_m:g} m"
     facts = [("Project", name), ("Met mast", f"{site['lat']:.6f}, {site['lon']:.6f}"),
              ("UTM WGS 84", f"zone {u['zone']}{u['hemisphere']}, {u['easting']:.0f} E, {u['northing']:.0f} N"),
              ("Measured", period), ("Mean wind speed at the mast", mean), ("Map height", f"{height_m:g} m above ground"),
-             ("Flow model", how), ("Cell size", f"{cell_m:g} m"), ("Software", f"Bohemian Wind v{__version__}")]
+             ("Flow model", how), ("Cell size", cells), ("Software", f"Bohemian Wind v{__version__}")]
     if clim.get("summary"):                       # step 1 read monthly summary tables (intake/summary.py)
         basis = ("monthly summary tables, no ten-minute record checked"
                  + ("" if clim.get("no_direction") else "; wind directions from a reanalysis, not measured"))
@@ -232,5 +234,5 @@ def mast_facts(name: str, site: dict, clim: dict, longterm: dict | None, height_
              f"Wind data: {mean}",
              f"Measurement period: {period}" + ("; from monthly summary tables" + ("" if clim.get("no_direction") else
                                                  ", directions from a reanalysis") if clim.get("summary") else ""),
-             f"Map: {how}; {cell_m:g} m cells; {height_m:g} m above ground" + (f"; {terrain}" if terrain else "")]
+             f"Map: {how}; {'atlas cells of about 250 m' if engine == 'atlas' else f'{cell_m:g} m cells'}; {height_m:g} m above ground" + (f"; {terrain}" if terrain else "")]
     return facts, lines
