@@ -4,6 +4,7 @@
 |---|---|
 | `banner.jpg` | Field photograph supplied by Bohemian Renewables, cropped |
 | `app-*.jpg` | Screenshots of the application running the demo project (invented data) |
+| `demo-walkthrough.gif`, `demo-video-poster.jpg` | Stills of the demo project with captions; the full video is `docs/media/bohemian-wind-demo.mp4` (2 minutes, no sound) |
 | `flow_hill_speedup.png` | Made by the flow model on an idealised hill |
 | `bohemian-renewables-logo.png` | Bohemian Renewables house style. A trademark of Bohemian Renewables; not covered by the MIT licence |
 | `social-preview.png` | The repository's social preview (1280 x 640): the application's field photograph, darkened, with its six steps and the compliance notice. Upload it under *Settings*, *Social preview* |

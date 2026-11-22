@@ -17,18 +17,28 @@ Open-source software for the wind developer's workflow, built for projects in Ea
 </p>
 
 <p align="center">
-  <a href="#download">Download</a> |
-  <a href="#what-it-does">What it does</a> |
-  <a href="#where-each-part-stands">Status</a> |
-  <a href="#documentation">Documentation</a> |
-  <a href="#for-developers">For developers</a> |
-  <a href="#contributing">Contributing</a>
+  <a href="https://github.com/MugambiD/bohemian-wind/releases"><img alt="Download for Windows" src="https://img.shields.io/badge/Download_for_Windows-setup_program-008781?style=for-the-badge&logo=windows&logoColor=white" height="44"></a>
 </p>
+<p align="center">Free. No account. Runs on your own computer; your measurements never leave it.<br>
+<a href="docs/media/bohemian-wind-demo.mp4">Watch the 2-minute demo</a> |
+<a href="#try-it-without-any-data">Try it without any data</a> |
+<a href="#what-it-does">What it does</a> |
+<a href="#where-each-part-stands">Status</a> |
+<a href="#documentation">Documentation</a> |
+<a href="#for-developers">For developers</a></p>
 
 > [!IMPORTANT]
 > **[COMPLIANCE]** Developer estimates prepared by Bohemian Renewables with open-source tools. Nothing here is an accredited or bankable assessment, and it must not be used for financing decisions. The same notice stays on screen in the application and is printed on every report.
 
-<p align="center"><img src="docs/images/app-overview.jpg" alt="The overview screen: six steps, each with its result" width="100%"></p>
+## See it in two minutes
+
+<p align="center"><a href="docs/media/bohemian-wind-demo.mp4"><img src="docs/images/demo-walkthrough.gif" alt="A walk through the six steps on the demo project: mast data, long-term correction, wind map, layout and energy, noise and shadow flicker, permitting pack, and the report" width="100%"></a></p>
+<p align="center"><i>The six steps on the built-in demo project (invented data). Select the picture for the <a href="docs/media/bohemian-wind-demo.mp4">full video</a> (MP4, 2 minutes, no sound; if it does not play in the page, download it).</i></p>
+
+| The project at a glance | A classed wind map | A layout with its energy |
+|---|---|---|
+| <img src="docs/images/app-overview.jpg" alt="Overview screen: six steps, each with its result"> | <img src="docs/images/app-wind-map.jpg" alt="Wind map step: the mean wind speed over the terrain round the mast"> | <img src="docs/images/app-layout-map.jpg" alt="Layout step: turbines inside the constraints, over the wind map"> |
+| Six steps, each with its result, marked when out of date | Mean wind speed over the terrain, also as a Google Earth file | Turbines inside your constraints, with P50, P75 and P90 |
 
 ## Highlights
 
@@ -37,6 +47,8 @@ Open-source software for the wind developer's workflow, built for projects in Ea
 - **Three ways to map the wind.** Its own linear flow model, the Global Wind Atlas pattern scaled to the mast, or a CFD screening run with OpenFOAM for steeper ground.
 - **Energy with its uncertainty.** Layouts that keep to your exclusion zones and buffers, wake losses through PyWake, and P50, P75 and P90 from an uncertainty budget that follows where each turbine stands.
 - **Homes screened.** Buildings from OpenStreetMap and Microsoft's footprints, merged with your own file, each screened for noise and worst-case shadow flicker.
+- **Reports and maps you can hand on.** After every step: a wind resource analysis in Word and PDF that shows how far the work has gone, and a Google Earth file. Micrositing and project summary reports follow with the layout.
+- **A mast known only from reports.** Monthly summary tables can stand in for logger files for a first view, and every output says so.
 - **Private by design.** It runs on your computer, and your measurements never leave it. It goes online only to fetch public reference data for the site's area.
 
 ## Download
@@ -55,7 +67,9 @@ Open-source software for the wind developer's workflow, built for projects in Ea
 - **macOS or Linux:** `./start.sh`
 - The first start sets itself up (a few minutes, needs the internet once). After that it opens in your browser in seconds.
 
-**Try it without any data.** On the first screen choose **Open the demo project**, then **Run all six steps**. The demo is an invented site: mast records with five planted faults, a ridge drawn from a formula, homes and exclusion zones. It runs in about ten seconds and needs no internet.
+### Try it without any data
+
+On the first screen choose **Open the demo project**, then **Run all six steps**. The demo is an invented site: mast records with five planted faults, a ridge drawn from a formula, homes and exclusion zones. It runs in about ten seconds and needs no internet.
 
 ## What it does
 
@@ -69,8 +83,6 @@ Six steps, in order. Each screen asks for what it needs on the left and shows wh
 | 4. **Layout and energy** | Turbine size and number; your exclusion zones, homes and buffers | Turbine positions, wake loss, P50, P75 and P90 |
 | 5. **Noise and shadow flicker** | Limits to screen against | Every home checked, with maps |
 | 6. **Permitting pack** | Nothing | Coordinates with tip heights, GIS files, maps, the Google Earth wind map, the three Word reports and a summary page |
-
-<p align="center"><img src="docs/images/app-layout-map.jpg" alt="Layout step: constraints on the left, the layout over the wind map on the right" width="100%"></p>
 
 ### Daily intake
 
@@ -90,7 +102,7 @@ Honest status of this version (0.3.2-dev). "Working" means it runs end to end an
 |---|---|
 | Daily mast data arriving automatically | **Working as a folder watch.** It re-runs the checks when logger files appear and warns when data stops. It does not fetch from the logger, its email or its cloud service: point those at the folder. |
 | Data quality checks and analysis | **Working** for NRG SymphoniePRO, NRG Symphonie text exports (Symphonie Data Retriever), Campbell Scientific TOA5, SecondWind Nomad2 and WindPRO time series exports. RLD files need NRG's free SymPRO Desktop (Windows) to convert them, raw RWD files NRG's free Symphonie Data Retriever. ZIP, RAR, 7z and tar archives of logger files are opened as they are; RAR and 7z with the archive program the computer already has. A period when the logger's clock was wrong can be corrected in the project. |
-| Long-term correction | **Working, one method:** a monthly index against NASA POWER (MERRA-2 at 50 m), with a check of the vane's north against the reanalysis wind direction. No second reference, no hourly method yet. |
+| Long-term correction | **Working, one method:** a monthly index against NASA POWER (MERRA-2 at 50 m), with a check of the vane's north against the reanalysis wind direction. A second reference from a file of your own (for example ERA5 from the Copernicus Climate Data Store) can be set beside it. No hourly method yet. |
 | Wind resource maps | **Working, three methods:** the own flow model over SRTM terrain, the Global Wind Atlas pattern scaled to the mast, or CFD with OpenFOAM. |
 | Own flow model | **First version.** Terrain speed-up from linear theory (Jackson and Hunt). Tested against theory and, in house, against measured masts: sound on gentle ground, wrong at an escarpment. Not for steep terrain; the application says when the ground is too steep. |
 | CFD wind map | **First version.** Steady RANS with OpenFOAM (GPL-3.0, run as separate programs; the Windows setup program carries it with its source). Tested on invented hills and, in house, on measured masts. A screening run, not a flow study for complex terrain. Hours of computing. |
