@@ -119,7 +119,8 @@ def test_the_steps_and_the_reports_run_on_summary_tables(tmp_path):
     lt, wm = p.result("longterm"), p.result("map")
     assert lt["r"] > 0.99 and lt["vane_check"] is None and lt["measured_height_m"] == 80
     assert any("summary tables" in w and "reanalysis" in w for w in wm["warnings"])
-    assert zipfile.ZipFile(p.folder / wm["kmz"]).read("doc.kml")
+    kml = zipfile.ZipFile(p.folder / wm["kmz"]).read("doc.kml").decode("utf-8")
+    assert "monthly summary tables" in kml and "directions from a reanalysis" in kml        # the Google Earth file says so too
     reports = {Path(x["file"]).name.split("_Demo")[0]: p.folder / x["file"] for x in wm["reports"] if x["file"].endswith(".docx")}
     assert set(reports) == {"Wind_Resource_Analysis", "Project_Wind_Summary"}
 
@@ -131,7 +132,7 @@ def test_the_steps_and_the_reports_run_on_summary_tables(tmp_path):
     assert "not from the mast's ten-minute records" in wra and "reanalysis, not measured" in wra
     assert f"{lt['long_term']:.2f} m/s" in wra and f"{summary.MEASUREMENT_PCT:.1f}" in wra and "The wind over the site" in wra
     assert "Departures from usual practice" not in wra and "Tower shading" not in wra          # sections only records can fill
-    assert "monthly summary tables" in summ and "ten-minute record was checked" in summ
+    assert "monthly summary tables" in summ and "ten-minute record was checked" in summ and "no record checked" in summ
     from bohemian_wind.reports import kit  # noqa: PLC0415
     for t in (wra, summ):                                                                       # [COMPLIANCE] on every report
         assert t.count(kit.NOTICE) >= 2

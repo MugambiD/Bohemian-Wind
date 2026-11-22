@@ -222,10 +222,15 @@ def mast_facts(name: str, site: dict, clim: dict, longterm: dict | None, height_
              ("UTM WGS 84", f"zone {u['zone']}{u['hemisphere']}, {u['easting']:.0f} E, {u['northing']:.0f} N"),
              ("Measured", period), ("Mean wind speed at the mast", mean), ("Map height", f"{height_m:g} m above ground"),
              ("Flow model", how), ("Cell size", f"{cell_m:g} m"), ("Software", f"Bohemian Wind v{__version__}")]
+    if clim.get("summary"):                       # step 1 read monthly summary tables (intake/summary.py)
+        basis = ("monthly summary tables, no ten-minute record checked"
+                 + ("" if clim.get("no_direction") else "; wind directions from a reanalysis, not measured"))
+        facts.insert(4, ("Basis of the wind data", basis))
     if terrain:
         facts.insert(-1, ("Terrain", terrain))
     lines = [f"Reference point: UTM WGS 84 zone {u['zone']}{u['hemisphere']}, {u['easting']:.0f} E, {u['northing']:.0f} N",
              f"Wind data: {mean}",
-             f"Measurement period: {period}",
+             f"Measurement period: {period}" + ("; from monthly summary tables" + ("" if clim.get("no_direction") else
+                                                 ", directions from a reanalysis") if clim.get("summary") else ""),
              f"Map: {how}; {cell_m:g} m cells; {height_m:g} m above ground" + (f"; {terrain}" if terrain else "")]
     return facts, lines

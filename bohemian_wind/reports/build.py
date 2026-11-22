@@ -898,7 +898,7 @@ def summary(project, path, date: datetime | None = None) -> Path:
     mean, what = src.lt_mean()
 
     doc.h1(titles[0])
-    done = [("Mast data checked", bool(d)), ("Long-term correction", bool(lt)), ("Wind map", bool(wm)), ("Layout and energy", bool(lay)),
+    done = [("Mast data read from summary tables (no record checked)" if _tables(c) else "Mast data checked", bool(d)), ("Long-term correction", bool(lt)), ("Wind map", bool(wm)), ("Layout and energy", bool(lay)),
             ("Noise and shadow flicker screening", bool(env))]
     doc.table(["Step", "Status"], [[a, "Done" if b else "Not yet, or out of date"] for a, b in done], widths=[9, 6.9], caption="Steps of the analysis", numeric_from=None)
     rows = [(f"Long-term mean wind speed at {c['height_m']:g} m", f"{mean:.2f} m/s ({what})"),
