@@ -531,6 +531,10 @@ class Project:
         if clim.get("no_direction"):
             out.append("No wind direction was measured: every direction is given the same wind, so the wind map and the "
                        "wake losses are rough.")
+        if clim.get("summary"):                    # step 1 read monthly summary tables (intake/summary.py)
+            out.append("The wind climate rests on monthly summary tables, not on checked ten-minute records"
+                       + ("" if clim.get("no_direction") else ", and its wind directions are a reanalysis's, not the mast's")
+                       + ": a first view, to be redone from the records.")
         lt = self.result("longterm") or {}
         cautions = list(lt.get("cautions") or [])            # a part-year, a thin month or a doubtful vane reaches the energy too
         v = lt.get("vane_check")
@@ -1003,7 +1007,9 @@ class Project:
             out["notes"].append(checks["position_check_note"])
         log(f"Wind map at {height:g} m: {out['min_ws']:.1f} to {out['max_ws']:.1f} m/s; {wf.mast_mean_ws:.2f} m/s at the mast.")
         out["kmz"] = self._kmz("maps/wind_map.kmz", wf, height, log=log)
-        return self._store("map", out)
+        out = self._store("map", out)
+        self._reports("map", log)                  # the project summary, and a report from summary tables, carry the map
+        return out
 
     # ---------- step 4: constraints, layout, energy ----------
 

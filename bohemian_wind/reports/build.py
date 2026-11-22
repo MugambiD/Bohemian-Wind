@@ -149,6 +149,20 @@ def _ref_pct(src: Source) -> float:
     return budget.reference_pct(((src.lt or {}).get("second") or {}).get("difference_pct"))
 
 
+def _tables(c: dict | None) -> dict | None:
+    """What a climate made from summary tables says about itself (intake/summary.py); None for logger files."""
+    return (c or {}).get("summary") or None
+
+
+def _meas(src: Source) -> tuple:
+    """(measurement term in % of wind speed, its basis)."""
+    from ..energy import budget  # noqa: PLC0415
+    t = _tables(src.clim)
+    if t:
+        return float(t.get("measurement_pct") or 4.0), "monthly means taken from reports: sensors, mounting and data handling not checked"
+    return budget.DEFAULT_SPEED_UNCERTAINTY[budget.MEASUREMENT], "one mast: sensors, mounting, data recovery"
+
+
 def _second_rows(lt: dict) -> list:
     s = lt["second"]
     return [["First: " + lt.get("credit", "").split(": ", 1)[-1].rstrip("."), f"{lt['factor']:.3f}", f"{lt['long_term']:.2f}", f"{lt['r']:.2f}",
@@ -170,7 +184,7 @@ def _hub_table(src: Source) -> list:
     rows = []
     for h in sorted(set(HUB_HEIGHTS) | {top}):
         v = budget.vertical_pct(h, top, clean)
-        terms = [budget.DEFAULT_SPEED_UNCERTAINTY[budget.MEASUREMENT], ltp, v] + ([_ref_pct(src)] if src.lt else [])
+        terms = [_meas(src)[0], ltp, v] + ([_ref_pct(src)] if src.lt else [])
         total = sum(t * t for t in terms) ** 0.5
         rows.append([f"{h:g} m" + (" (top anemometer)" if h == top else ""), f"{mean * (h / top) ** alpha:.2f}", f"{v:.1f}", f"{total:.1f}"])
     return rows
@@ -201,7 +215,9 @@ def _df_rows(df, cols: list | None = None, nd: int = 2, limit: int = 40) -> tupl
 def _basis(src: Source) -> list:
     d = src.data
     rows = [("Project", src.name), ("Measurement data", f"{d.get('format', 'logger files')}; {_day(d.get('period', ['', ''])[0])} to "
-                                    f"{_day(d.get('period', ['', ''])[1])}; {d.get('records', 0):,} valid records at the top height")]
+                                    f"{_day(d.get('period', ['', ''])[1])}; "
+                                    + (f"{src.clim['recovery_pct']:.0f} % of the period valid at the top height, as reported" if _tables(src.clim)
+                                       else f"{d.get('records', 0):,} valid records at the top height"))]
     if src.lt:
         rows.append(("Long-term reference", f"{src.lt.get('method', 'monthly index')}; {src.lt.get('credit', '')}"))
     if src.map:
@@ -212,12 +228,55 @@ def _basis(src: Source) -> list:
     return rows
 
 
+def _long_term(doc, src: Source) -> None:
+    """The long-term correction as a report section's body (the heading is the caller's)."""
+    lt = src.lt
+    if lt:
+        doc.p(f"The measured period is short against the life of a wind farm. To place it in the long term, the monthly means of the mast "
+              f"are set against a reanalysis reference for the same months. Method: {lt.get('method', 'monthly index')}.")
+        doc.kv([("Reference", lt.get("credit", "")), ("Reference record", f"{lt.get('reference_first', '')[:7]} to {lt.get('reference_last', '')[:7]}"),
+                ("Long-term years", f"{lt['lt_years'][0]} to {lt['lt_years'][1]}"),
+                ("Months used", f"{lt['months']} ({lt['first_month']} to {lt['last_month']}); {lt['calendar_months']} of the twelve calendar months"),
+                ("Monthly correlation", f"r = {lt['r']:.2f}"),
+                ("Reference, same months / long term", f"{lt['reference_concurrent']:.2f} / {lt['reference_long_term']:.2f} m/s (at the reference's own height)"),
+                (f"Mast at {lt['height_m']:g} m, same months", f"{lt['measured']:.2f} m/s"),
+                ("Long-term factor", f"{lt['factor']:.3f}"), (f"Long-term mean at {lt['height_m']:g} m", f"{lt['long_term']:.2f} m/s")],
+               caption="Long-term correction")
+        doc.figure(fg.correlation(lt.get("monthly"), lt.get("r")), "Monthly means of the mast against the reference", 10.5)
+        if lt.get("second"):
+            s2 = lt["second"]
+            doc.h2("A second reference")
+            doc.p(f"The correction was made again with a second, independent reanalysis series ({s2['what']}). It puts the long-term mean at "
+                  f"{s2['long_term']:.2f} m/s, {s2['difference_pct']:+.1f} % from the first. The first reference's mean is the one carried "
+                  f"forward; the mean of the two would be {s2['mean_of_two']:.2f} m/s. The distance between them sets the reference term of "
+                  f"the uncertainty: {_ref_pct(src):.1f} % of the wind speed.")
+            doc.table(["Reference", "Long-term factor", f"Long-term mean at {lt['height_m']:g} m, m/s", "Monthly r", "Long-term years"],
+                      _second_rows(lt), widths=[6.4, 2.2, 3.0, 1.8, 2.5], caption="The two long-term references side by side")
+            doc.figure(fg.correlation(s2.get("monthly"), s2.get("r")), "Monthly means of the mast against the second reference", 10.5)
+        v = lt.get("vane_check")
+        if v:
+            doc.p(f"Vane north check: on {v['days']} days with {v['min_ws']:g} m/s or more, the direction at {v['height_m']:g} m runs "
+                  f"{v['median_deg']:+.0f}° from the reanalysis (quartiles {v['q25_deg']:+.0f}° to {v['q75_deg']:+.0f}°)."
+                  + (f" {v['caution']}" if v.get("caution") else ""))
+        if lt.get("cautions"):
+            doc.flag(lt["cautions"], label="Check:")
+        doc.note("Two reanalyses share many of their observations, so their agreement narrows the doubt without removing it. No nearby "
+                 "long-term station was used." if lt.get("second") else
+                 "One reanalysis is one view of the long term. The correction was not checked against a second reference or a "
+                 "nearby long-term station; the uncertainty carries a term for this.")
+    else:
+        doc.flag("No long-term correction has been made (step 2 has not been run, or is out of date). The figures of this report are "
+                 "those of the measured period.", label="Check:")
+
+
 # ---------------------------------------------------------------- wind resource analysis
 
 def wind_resource(project, path, date: datetime | None = None) -> Path:
     src = Source(project)
     if not src.clim:
         raise ValueError("Run step 1 (mast data) first: the wind resource analysis is written from its results.")
+    if _tables(src.clim):
+        return _wind_resource_from_tables(src, path, date)
     c, d, lt = src.clim, src.data, src.lt
     date = date or datetime.now()
     top = c["height_m"]
@@ -399,42 +458,7 @@ def wind_resource(project, path, date: datetime | None = None) -> Path:
 
     # 8 long term
     doc.h1(titles[7])
-    if lt:
-        doc.p(f"The measured period is short against the life of a wind farm. To place it in the long term, the monthly means of the mast "
-              f"are set against a reanalysis reference for the same months. Method: {lt.get('method', 'monthly index')}.")
-        doc.kv([("Reference", lt.get("credit", "")), ("Reference record", f"{lt.get('reference_first', '')[:7]} to {lt.get('reference_last', '')[:7]}"),
-                ("Long-term years", f"{lt['lt_years'][0]} to {lt['lt_years'][1]}"),
-                ("Months used", f"{lt['months']} ({lt['first_month']} to {lt['last_month']}); {lt['calendar_months']} of the twelve calendar months"),
-                ("Monthly correlation", f"r = {lt['r']:.2f}"),
-                ("Reference, same months / long term", f"{lt['reference_concurrent']:.2f} / {lt['reference_long_term']:.2f} m/s (at the reference's own height)"),
-                (f"Mast at {lt['height_m']:g} m, same months", f"{lt['measured']:.2f} m/s"),
-                ("Long-term factor", f"{lt['factor']:.3f}"), (f"Long-term mean at {lt['height_m']:g} m", f"{lt['long_term']:.2f} m/s")],
-               caption="Long-term correction")
-        doc.figure(fg.correlation(lt.get("monthly"), lt.get("r")), "Monthly means of the mast against the reference", 10.5)
-        if lt.get("second"):
-            s2 = lt["second"]
-            doc.h2("A second reference")
-            doc.p(f"The correction was made again with a second, independent reanalysis series ({s2['what']}). It puts the long-term mean at "
-                  f"{s2['long_term']:.2f} m/s, {s2['difference_pct']:+.1f} % from the first. The first reference's mean is the one carried "
-                  f"forward; the mean of the two would be {s2['mean_of_two']:.2f} m/s. The distance between them sets the reference term of "
-                  f"the uncertainty: {_ref_pct(src):.1f} % of the wind speed.")
-            doc.table(["Reference", "Long-term factor", f"Long-term mean at {lt['height_m']:g} m, m/s", "Monthly r", "Long-term years"],
-                      _second_rows(lt), widths=[6.4, 2.2, 3.0, 1.8, 2.5], caption="The two long-term references side by side")
-            doc.figure(fg.correlation(s2.get("monthly"), s2.get("r")), "Monthly means of the mast against the second reference", 10.5)
-        v = lt.get("vane_check")
-        if v:
-            doc.p(f"Vane north check: on {v['days']} days with {v['min_ws']:g} m/s or more, the direction at {v['height_m']:g} m runs "
-                  f"{v['median_deg']:+.0f}° from the reanalysis (quartiles {v['q25_deg']:+.0f}° to {v['q75_deg']:+.0f}°)."
-                  + (f" {v['caution']}" if v.get("caution") else ""))
-        if lt.get("cautions"):
-            doc.flag(lt["cautions"], label="Check:")
-        doc.note("Two reanalyses share many of their observations, so their agreement narrows the doubt without removing it. No nearby "
-                 "long-term station was used." if lt.get("second") else
-                 "One reanalysis is one view of the long term. The correction was not checked against a second reference or a "
-                 "nearby long-term station; the uncertainty carries a term for this.")
-    else:
-        doc.flag("No long-term correction has been made (step 2 has not been run, or is out of date). The figures of this report are "
-                 "those of the measured period.", label="Check:")
+    _long_term(doc, src)
 
     # 9 shear
     doc.h1(titles[8])
@@ -467,7 +491,7 @@ def wind_resource(project, path, date: datetime | None = None) -> Path:
     doc.p("The uncertainty of the long-term mean wind speed is built from independent terms, each one standard deviation in per cent "
           "of the wind speed. They are the developer's working assumptions, each with its reason; they are not derived from "
           "calibration certificates or from a standard's procedure.")
-    urows = [["Measurement", f"{budget.DEFAULT_SPEED_UNCERTAINTY[budget.MEASUREMENT]:.1f}", "one mast: sensors, mounting, data recovery"],
+    urows = [["Measurement", f"{_meas(src)[0]:.1f}", _meas(src)[1]],
              ["Long-term correction", f"{ltp:.1f}", why]]
     if lt:
         urows.append(["Long-term reference", f"{_ref_pct(src):.1f}", "half the distance between the two references' long-term means, at least "
@@ -500,6 +524,192 @@ def wind_resource(project, path, date: datetime | None = None) -> Path:
     doc.h1(titles[12])
     credits = list(dict.fromkeys(([lt["credit"]] if lt and lt.get("credit") else []) + ((src.map or {}).get("credits") or [])))
     doc.bullets([f"Mast data: {d.get('format', 'logger files')}, supplied for this project. Input fingerprint and file list: inputs.csv in the run folder."]
+                + credits + [f"Software: Bohemian Wind v{__version__}, open source (MIT licence)."])
+    doc.flag(NOTICE)
+    return doc.save(path)
+
+
+def _wind_resource_from_tables(src: Source, path, date: datetime | None = None) -> Path:
+    """The wind resource analysis of a project whose step 1 read monthly summary tables (intake/summary.py): the
+    same order as the full report, without the sections only ten-minute records can fill, and with what the tables
+    cannot give said where it matters."""
+    from ..energy import budget  # noqa: PLC0415
+    c, d, lt, wm, t = src.clim, src.data, src.lt, src.map, _tables(src.clim)
+    date = date or datetime.now()
+    top = c["height_m"]
+    alpha, alpha_note = src.alpha()
+    mean, mean_what = src.lt_mean()
+    doc = Report("Wind Resource Analysis", src.name, f"BR-WRA-{_slug(src.name)}-{date:%Y%m%d}",
+                 ["First view from monthly summary tables", f"Reported period {_day(c['period'][0])} to {_day(c['period'][1])}"], date)
+    doc.control(basis=_basis(src))
+    titles = ["Summary", "What this analysis rests on", "Site and mast", "The reported data", "Wind statistics", "Long-term correction",
+              "Wind shear and hub heights", "The wind over the site", "Uncertainty", "Findings", "What is needed to firm this up", "Data sources"]
+    doc.contents(titles)
+    months = d.get("monthly") or [{"month": k, **v} for k, v in sorted((c.get("monthly") or {}).items())]
+    usable = sum(1 for m in months if m["share"] >= 0.7)
+
+    # 1 summary
+    doc.h1(titles[0])
+    doc.p(f"This report gives a first view of the wind at the met mast of {src.name}. It is written from monthly summary tables "
+          f"({t['source']}), not from the mast's ten-minute records. The top anemometer stands at {top:g} m; the tables cover "
+          f"{_day(c['period'][0])} to {_day(c['period'][1])}, with valid data for {c['recovery_pct']:.0f} % of that time.")
+    rows = src.position_rows() + [
+        ("Reported period", f"{_day(c['period'][0])} to {_day(c['period'][1])} ({len(months)} months touched, {usable} with at least 70 % valid data; "
+                            f"{c['calendar_months']} of the 12 calendar months)"),
+        (f"Mean wind speed at {top:g} m, reported", f"{c['mean_ws']:.2f} m/s over the valid time"
+         + (f"; {c['momm_ws']:.2f} m/s as the mean of monthly means" if c.get("momm_ws") else "")),
+        (f"Mean wind speed at {top:g} m, long term", f"{mean:.2f} m/s ({mean_what})"),
+    ]
+    if lt:
+        rows += [("Long-term factor", f"{lt['factor']:.3f} ({100 * (lt['factor'] - 1):+.1f} %), from {lt['months']} months"),
+                 ("Correlation with the reference", f"monthly r = {lt['r']:.2f}; reference years {lt['lt_years'][0]} to {lt['lt_years'][1]}")]
+        if lt.get("second"):
+            rows.append(("Second reference", f"{lt['second']['long_term']:.2f} m/s ({lt['second']['difference_pct']:+.1f} % from the first)"))
+    rows += [("Weibull shape factor", f"k = {c['weibull_k']:.2f} ({t['weibull_k_basis']}); A = {c['weibull_A']:.2f} m/s follows from the mean"),
+             ("Shear exponent", f"{alpha:.3f} ({(c.get('shear') or {}).get('basis') or alpha_note})" if alpha is not None else "not measured"),
+             ("Wind directions", "not given" if c.get("no_direction") else f"not measured; taken from {t['direction']}")]
+    if not c.get("no_direction"):
+        best = max(c["sectors"], key=lambda s: s["freq"] * s["A"] ** 3)
+        rows.append(("Main direction of the wind energy", f"{best['centre']:.0f}° ({100 * best['freq']:.0f} % of the time), by the reanalysis"))
+    doc.kv(rows, caption="Overview of results")
+    hub = _hub_table(src)
+    if hub:
+        doc.table(["Height above ground", "Long-term mean wind speed, m/s", "Vertical extrapolation, % of speed", "Total, % of speed (1 σ)"],
+                  hub, widths=[4.6, 4.2, 3.8, 3.3], caption="Long-term mean wind speed by hub height, with its uncertainty")
+    doc.flag("First view from summary tables. No ten-minute record was checked; the distribution's shape is one entered number; "
+             + ("the wind directions are a reanalysis's, not the site's. " if not c.get("no_direction") else "no direction is known. ")
+             + "The figures show whether the site is worth the next step, and are to be redone from the records.", label="Check:")
+    doc.flag(NOTICE)
+
+    # 2 basis
+    doc.h1(titles[1])
+    doc.p("A full wind resource analysis starts from the logger's ten-minute records, checks every record, and derives the wind statistics "
+          "from the records that pass. Here only monthly tables were at hand: a mean wind speed for each height and month, and the share "
+          "of each month that was valid. The table below sets out what each result rests on.")
+    doc.table(["Result", "Rests on", "Not available from tables"],
+              [["Monthly and overall mean wind speed", "the reports' monthly means, weighted by their valid time", "checks of single records: sensor faults, icing, tower shading, clock errors"],
+               ["Long-term correction", "the monthly means against a reanalysis, month by month", "daily or hourly correlation"],
+               ["Shear", "the ratio of the monthly means between heights", "shear by hour of day and by direction; a test on held-back records"],
+               ["Wind speed distribution", f"one Weibull shape factor, k = {c['weibull_k']:.2f}: {t['weibull_k_basis']}", "the measured histogram; a fit by direction"],
+               ["Wind rose", ("none" if c.get("no_direction") else f"{t['direction']}: sector frequencies and each sector's mean in proportion"), "the directions at the mast"],
+               ["Turbulence, air density", "not reported", "turbulence intensity; measured temperature and pressure"]],
+              widths=[3.9, 6.4, 5.6], caption="What each result rests on", numeric_from=None, size=8)
+    doc.p("What this report is, and is not. " + SCOPE_NOT)
+
+    # 3 site
+    doc.h1(titles[2])
+    doc.kv(src.position_rows() + ([("Position taken from", t["position_basis"])] if t.get("position_basis") else [])
+           + ([("Terrain within the map area", f"{wm['elev_min']:.0f} to {wm['elev_max']:.0f} m above sea level; "
+                                               f"{wm['steep_share_pct']:.0f} % of the ground steeper than 30 %")] if wm else []),
+           caption="Position of the mast")
+    if wm and wm.get("complex_terrain"):
+        doc.flag(f"Complex terrain: {wm.get('steep_share_mast_pct', 0):.0f} % of the ground within 3.5 km of the mast is steeper than "
+                 "30 %. The wind measured at the mast stands for less of its surroundings than on gentle ground.", label="Check:")
+
+    # 4 data
+    doc.h1(titles[3])
+    doc.p(f"Source of the tables: {t['source']}. The means are used as reported. Overlapping report periods were joined into calendar "
+          "months before they were entered; a month counts towards the monthly means and the long-term correction when at least 70 % of it is valid.")
+    mt = src.sheet("Monthly means")
+    if mt is not None:
+        head, rws = _df_rows(mt)
+        doc.table(head, rws, caption="Monthly mean wind speed by height, m/s, as entered from the reports", size=8)
+    else:
+        doc.table(["Month", "Mean, m/s", "Valid data, %"], [[m["month"], f"{m['mean']:.2f}", f"{100 * m['share']:.0f}"] for m in months],
+                  caption=f"Monthly mean wind speed at {top:g} m", widths=[4, 4, 4])
+    doc.figure(fg.monthly(months, (lt or {}).get("monthly")), f"Monthly mean wind speed at {top:g} m")
+    doc.table(["Height, m", "Valid time, % of the period", "Mean over the valid time, m/s", "Mean of monthly means, m/s"],
+              [[f"{h['height_m']:g}", _f(h.get("recovery_pct"), 1), _f(h.get("mean_ws")), _f(h.get("momm_ws")) if h.get("momm_ws") else "not all 12 calendar months"]
+               for h in c.get("heights") or []], caption="Wind speed by height", widths=[2.6, 4.2, 4.6, 4.5])
+
+    # 5 statistics
+    doc.h1(titles[4])
+    doc.p(f"The wind speed distribution is drawn from the mean at {top:g} m and the shape factor k = {c['weibull_k']:.2f} ({t['weibull_k_basis']}). "
+          "It is not a fit to measured records.")
+    doc.figure(fg.distribution(c["weibull_A"], c["weibull_k"], None, top, label="Weibull distribution from the mean and the entered shape"),
+               f"Wind speed distribution at {top:g} m, from the mean and the entered shape factor", 13.5)
+    if not c.get("no_direction"):
+        doc.p(f"The mast's wind directions were not available. The rose below is that of {t['direction']}; each sector's mean wind speed is the "
+              f"mast's mean in the proportion the reanalysis gives. On ridges and escarpments the terrain turns and channels the wind, so the "
+              "real rose at the mast may differ.")
+        doc.figure(fg.rose(c["sectors"], "freq"), "Wind direction: share of the time (reanalysis, not measured)", 8.5)
+        doc.figure(fg.rose(c["sectors"], "energy"), "Wind direction: share of the wind energy (reanalysis directions, mast's mean)", 8.5)
+        doc.table(["Direction, °", "Share of time, %", "Mean, m/s", "Weibull A, m/s", "Weibull k"],
+                  [[f"{s['centre']:.0f}", f"{100 * s['freq']:.1f}", _f(s.get("mean")), f"{s['A']:.2f}", f"{s['k']:.2f}"] for s in c["sectors"]],
+                  caption=f"Wind climate by direction sector carried into the later steps, {top:g} m", numeric_from=0)
+        doc.note("Each sector carries the same shape factor, set so that all sectors together are as wide as the entered k.")
+    else:
+        doc.flag("No wind direction is known: every direction is treated alike in later steps.", label="Check:")
+
+    # 6 long term
+    doc.h1(titles[5])
+    _long_term(doc, src)
+
+    # 7 shear
+    doc.h1(titles[6])
+    sh = c.get("shear") or {}
+    doc.p((f"The shear exponent used to carry the wind to other heights is {alpha:.3f}: {alpha_note}." if alpha is not None else
+           "Wind speed was reported at one height only: no shear could be derived.")
+          + (f" Fitted over all reported heights, the exponent is {sh['alpha_all_heights']:.3f}." if sh.get("alpha_all_heights") is not None else "")
+          + " It comes from the ratio of mean wind speeds between heights over the months in which all heights were reported.")
+    if sh.get("warning"):
+        doc.flag(sh["warning"], label="Check:")
+    doc.figure(fg.profile(c.get("heights") or [], alpha, mean, top), "Reported profile and the power law used above the mast", 10.5)
+    if hub:
+        doc.table(["Height above ground", "Long-term mean wind speed, m/s", "Vertical extrapolation, % of speed", "Total, % of speed (1 σ)"],
+                  hub, widths=[4.6, 4.2, 3.8, 3.3], caption="Long-term mean wind speed by hub height")
+    doc.note("A mean shear hides its daily swing: at many sites the wind rises faster with height at night than by day. With the "
+             "records, the shear is taken by hour and direction and tested on held-back data.")
+
+    # 8 map
+    doc.h1(titles[7])
+    if wm:
+        doc.p(f"The mast's long-term wind was carried over {wm['area_km2']:.0f} km² of terrain with {ENGINES.get(wm['engine'], wm['engine'])}. At "
+              f"{wm['height_m']:g} m above ground the mean wind speed runs from {wm['min_ws']:.1f} to {wm['max_ws']:.1f} m/s over the map. "
+              "The classed map is also written as a Google Earth file (wind_map.kmz) with its key and the mast.")
+        doc.figure(src.p.folder / wm["map_print"] if wm.get("map_print") else None, f"Mean wind speed at {wm['height_m']:g} m above ground", 15.5)
+        if wm.get("warnings"):
+            doc.flag(list(wm["warnings"]), label="Check:")
+        doc.note("The map is as good as its anchor: one mast, known here from monthly means, at a position that is "
+                 + ("stated as: " + t["position_basis"] + "." if t.get("position_basis") else "taken as given."))
+    else:
+        doc.p("No wind map has been made yet (step 3).")
+
+    # 9 uncertainty
+    doc.h1(titles[8])
+    ltp, why = budget.long_term_pct(c.get("calendar_months"), corrected=bool(lt), months=len(c.get("monthly") or {}))
+    doc.p("The uncertainty of the long-term mean wind speed is built from independent terms, each one standard deviation in per cent "
+          "of the wind speed. They are the developer's working assumptions. The measurement term is larger than for a mast analysed "
+          "from its records, because nothing behind the monthly means could be checked.")
+    urows = [["Measurement", f"{_meas(src)[0]:.1f}", _meas(src)[1]], ["Long-term correction", f"{ltp:.1f}", why]]
+    if lt:
+        urows.append(["Long-term reference", f"{_ref_pct(src):.1f}", "half the distance between the two references' long-term means, at least "
+                      f"{budget.REFERENCE_TWO_FLOOR_PCT:g} %" if lt.get("second") else "one reanalysis, not checked against a second"])
+    urows.append(["Vertical extrapolation", "by height", f"{budget.V_BASE_PCT:g} % within the reported heights, more for every 10 m above the top anemometer"])
+    doc.table(["Term", "% of wind speed", "Basis"], urows, widths=[4.2, 2.6, 9.1], caption="Uncertainty terms of the wind speed at the mast")
+    doc.note("Not in the table: the error of a wrong mast position, and of a wind rose that is not the site's. Both act on the map and on "
+             "any energy estimate, not on the mean at the mast.")
+
+    # 10 findings
+    doc.h1(titles[9])
+    doc.bullets([x for x in (d.get("findings") or []) if "not an accredited" not in x][:60] or ["No findings were recorded."])
+
+    # 11 next
+    doc.h1(titles[10])
+    doc.bullets(["The ten-minute records of every channel, with the standard deviations, and the logger's own files and program.",
+                 "The installation report: surveyed coordinates, sensor heights, boom lengths and bearings, the mast's cross-section.",
+                 "The calibration certificates and the maintenance log, with the cause of every gap.",
+                 "A wind vane, a thermometer and a barometer on the mast if it has none: direction, air density and stability cannot be measured without them.",
+                 "Twelve months in a row with good recovery; until then the seasons not measured rest on the reanalysis.",
+                 "Then: step 1 of Bohemian Wind on the records, and this report written again from them."])
+    doc.p("An independent assessor would ask for the same before a financing decision.")
+
+    # 12 sources
+    doc.h1(titles[11])
+    credits = list(dict.fromkeys(([lt["credit"]] if lt and lt.get("credit") else []) + ((wm or {}).get("credits") or [])))
+    doc.bullets([f"Mast data: {t['source']}, as monthly summary tables. The file entered and its fingerprint: inputs.csv in the run folder."]
+                + ([f"Wind directions: {t['direction']}."] if not c.get("no_direction") else [])
+                + ([f"Second long-term reference: {lt['second']['what']}."] if (lt or {}).get("second") else [])
                 + credits + [f"Software: Bohemian Wind v{__version__}, open source (MIT licence)."])
     doc.flag(NOTICE)
     return doc.save(path)
@@ -703,15 +913,21 @@ def summary(project, path, date: datetime | None = None) -> Path:
 
     doc.h1(titles[1])
     alpha, _ = src.alpha()
-    doc.p(f"The mast's top anemometer stands at {c['height_m']:g} m. The data checks kept {c['records']:,} valid ten-minute records. The measured "
-          f"mean is {c['mean_ws']:.2f} m/s" + (f" ({c['momm_ws']:.2f} m/s as the mean of monthly means)" if c.get("momm_ws") else "")
-          + f"; the Weibull fit gives A = {c['weibull_A']:.2f} m/s and k = {c['weibull_k']:.2f}."
+    doc.p(f"The mast's top anemometer stands at {c['height_m']:g} m. "
+          + (f"The wind climate rests on monthly summary tables ({_tables(c)['source']}), valid for {c['recovery_pct']:.0f} % of the period; no "
+             "ten-minute record was checked. The measured " if _tables(c) else
+             f"The data checks kept {c['records']:,} valid ten-minute records. The measured ")
+          + f"mean is {c['mean_ws']:.2f} m/s" + (f" ({c['momm_ws']:.2f} m/s as the mean of monthly means)" if c.get("momm_ws") else "")
+          + (f"; with the shape factor entered, the Weibull distribution has A = {c['weibull_A']:.2f} m/s and k = {c['weibull_k']:.2f}." if _tables(c)
+             else f"; the Weibull fit gives A = {c['weibull_A']:.2f} m/s and k = {c['weibull_k']:.2f}.")
           + (f" Wind speed rises with height with a shear exponent of {alpha:.3f}." if alpha is not None else ""))
     doc.kv(src.position_rows(), caption="The mast")
     months = d.get("monthly") or [{"month": k, **v} for k, v in sorted((c.get("monthly") or {}).items())]
     doc.figure(fg.monthly(months, (lt or {}).get("monthly")), f"Monthly mean wind speed at {c['height_m']:g} m")
     if not c.get("no_direction"):
-        doc.figure(fg.rose(c["sectors"], "energy"), "Wind energy by direction", 8.5)
+        doc.figure(fg.rose(c["sectors"], "energy"), "Wind energy by direction" + (" (directions from the reanalysis, not measured)" if _tables(c) else ""), 8.5)
+    if _tables(c):
+        doc.flag([x for x in (d.get("findings") or [])[:3]], label="Check:")
 
     doc.h1(titles[2])
     if lt:
@@ -765,7 +981,9 @@ def summary(project, path, date: datetime | None = None) -> Path:
     checks = list(dict.fromkeys(((lay or {}).get("warnings") or []) + ((wm or {}).get("warnings") or []) + ((lt or {}).get("cautions") or [])))
     if checks:
         doc.flag(checks, label="Check:")
-    doc.bullets(["Have the measurement reviewed against the installation report, the calibration certificates and the maintenance log.",
+    doc.bullets((["Obtain the ten-minute records, the installation report and the calibration certificates, and run step 1 on them: "
+                  "until then every figure here is a first view."] if _tables(c) else []) +
+                ["Have the measurement reviewed against the installation report, the calibration certificates and the maintenance log.",
                  "Choose candidate turbines with their suppliers; replace the generic turbine with their data under the suppliers' terms.",
                  "Confirm the siting rules with the land agreements and the environmental and social assessment.",
                  "Commission an independent energy yield assessment, with a flow study where the terrain is complex, before any financing decision."])

@@ -144,6 +144,9 @@ def detect(path, also=None) -> dict:
             "found": found or "no data files at all", "files": len(files), "unread": unread, "blocked": blocked}
 
 
+SUMMARY_FILES = ("wind_summary.json",)    # see intake/summary.py; a direction file beside it is named in it
+
+
 def folder_signature(path) -> str:
     """Changes when a logger file is added, removed or rewritten."""
     import hashlib  # noqa: PLC0415
@@ -156,7 +159,7 @@ def folder_signature(path) -> str:
         for dirpath, dirs, names in os.walk(p):
             dirs[:] = sorted(d for d in dirs if not d.startswith(".") and d.lower() not in ("_to_delete", "converted", "runs"))
             for n in sorted(names):
-                if n.lower().endswith(DATA_SUFFIXES):
+                if n.lower().endswith(DATA_SUFFIXES) or (dirpath == str(p) and n.lower() in SUMMARY_FILES):
                     f = Path(dirpath) / n
                     try:
                         st = f.stat()
@@ -180,6 +183,18 @@ def run_checks(path, out_root, site_name: str | None = None, settings_path=None,
     out_root = Path(out_root)
     if not path.exists():
         raise IntakeError(f"Not found: {path}{paths.too_long(path)}")
+    from . import summary as _summary  # noqa: PLC0415
+    if _summary.find(path):                      # monthly summary tables instead of logger files (intake/summary.py)
+        if channels or clock:
+            raise IntakeError("Channel settings and clock corrections apply to logger files, not to summary tables. Take them out to run step 1.")
+        try:
+            run_dir = _summary.run(path, out_root, site_name=site_name, settings_path=settings_path, log=log)
+        except _summary.SummaryError as e:
+            raise IntakeError(str(e)) from e
+        out = summarise(run_dir)
+        out["format"] = _summary.LABEL
+        out["summary_tables"] = True
+        return out
     # archives first: their logger files are unpacked beside the other outputs and read from there
     opened = None
     archives = unpack.find(path) if path.is_dir() else [path] if unpack.kind(path) else []

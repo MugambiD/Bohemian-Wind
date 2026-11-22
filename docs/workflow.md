@@ -38,6 +38,23 @@ Every data check and every permitting pack is written to a folder of its own. A 
 
 **Stops at.** No calibration review, no mast-shadow correction, no icing model. A sensor that drifts slowly without failing a check is not caught.
 
+**A mast known only from reports.** Sometimes the ten-minute records are not at hand, only monthly reports. Put a file named `wind_summary.json` in the data folder and step 1 reads it in place of logger files:
+
+```json
+{
+ "format": "bohemian-wind-summary", "version": 1,
+ "source": "what the tables were taken from",
+ "site": {"name": "", "lat": 0.0, "lon": 0.0, "elevation_m": 0.0, "position_basis": "surveyed, or how it was inferred"},
+ "months": [{"month": "2026-03", "share": 0.98, "mean_ws": {"80": 7.1, "60": 6.8}}],
+ "weibull_k": 2.4, "weibull_k_basis": "why this value",
+ "direction": {"file": "reference.csv", "what": "ERA5 at 100 m, nearest grid point"}
+}
+```
+
+One row per calendar month: join overlapping report periods first. `share` is the valid share of the month, from 0 to 1; `mean_ws` holds the mean per height in metres. The mean over the valid time, the monthly means for the long-term correction and the shear between heights come from these rows. The distribution's shape is the one Weibull shape factor you enter (2.0 is assumed when none is given). `direction` is optional: an hourly table of a reanalysis with a time column and the wind as u and v components or as a speed and a direction. Its sector frequencies become the wind rose, and each sector's mean is the mast's mean in the proportion the reanalysis gives. Leave it out and every direction is treated alike.
+
+This is a first view, and every output says so. No record is checked, so sensor faults, icing, tower shading and clock errors stay unseen; a reanalysis does not see how terrain turns the wind at the site; the uncertainty carries 4 % for the measurement instead of 2.5 %. Run step 1 again on the records when they arrive.
+
 ## 2. Long-term correction
 
 **Does.** Monthly index: the ratio of the reference's 20-year mean of monthly means to its mean over the measured months. Months with under 70 % valid data are left out. Reference months that break the usual mast-to-reference ratio are dropped when they are among the reference's last four (NASA POWER appends a different model for its latest weeks); older months are never dropped, however much a seasonal ratio swings.

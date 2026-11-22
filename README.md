@@ -84,7 +84,7 @@ It runs step 1 if new files arrived, records what is new in `intake/status.json`
 
 ## Where each part stands
 
-Honest status of this version (0.3.1-dev). "Working" means it runs end to end and is covered by tests with known answers; it does not mean validated against measurements.
+Honest status of this version (0.3.2-dev). "Working" means it runs end to end and is covered by tests with known answers; it does not mean validated against measurements.
 
 | Capability | State |
 |---|---|

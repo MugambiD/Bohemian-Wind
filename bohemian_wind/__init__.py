@@ -1,6 +1,6 @@
 """Bohemian Wind: from met mast data to a permitting pack. Step 1 (the data checks) is also known as Bohemian Wind QC."""
 
-__version__ = "0.3.1-dev"
+__version__ = "0.3.2-dev"
 APP_NAME = "Bohemian Wind QC"          # printed on the data-check reports
 SUITE_NAME = "Bohemian Wind"
 ORG = "Bohemian Renewables"

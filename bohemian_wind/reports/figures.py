@@ -88,7 +88,7 @@ def rose(sectors: list, kind: str = "freq", rho: float = 1.225) -> bytes | None:
     return _png(fig)
 
 
-def distribution(A: float, k: float, speeds=None, height_m: float | None = None) -> bytes | None:
+def distribution(A: float, k: float, speeds=None, height_m: float | None = None, label: str | None = None) -> bytes | None:
     """The Weibull fit, over the histogram of the records when they are at hand."""
     if not (A and k):
         return None
@@ -98,7 +98,7 @@ def distribution(A: float, k: float, speeds=None, height_m: float | None = None)
         ax.hist(np.asarray(speeds, dtype=float), bins=np.arange(0, 31, 1.0), density=True, color="#A9D5D1", edgecolor="white",
                 linewidth=0.5, label="Valid 10-minute records")
     pdf = (k / A) * (x / A) ** (k - 1) * np.exp(-(x / A) ** k)
-    ax.plot(x, pdf, color=NAVY, lw=1.6, label=f"Weibull fit: A = {A:.2f} m/s, k = {k:.2f}")
+    ax.plot(x, pdf, color=NAVY, lw=1.6, label=f"{label or 'Weibull fit'}: A = {A:.2f} m/s, k = {k:.2f}")
     ax.set_xlim(0, min(30, max(20, A * 2.6)))
     ax.set_xlabel("Wind speed" + (f" at {height_m:g} m" if height_m else "") + ", m/s", color=MUTED)
     ax.set_ylabel("Share of the time per m/s", color=MUTED)

@@ -6,6 +6,16 @@ What changed in each version of Bohemian Wind. The format follows [Keep a Change
 
 ## [Unreleased]
 
+## [0.3.2-dev] - 2026-11-22
+
+### Added
+- Step 1 from monthly summary tables, for a mast known only from reports. A small file, `wind_summary.json`, holds the mean wind speed per height and month and the valid share of each month; step 1 reads it in place of logger files and the later steps run as usual. The shape of the wind speed distribution is one Weibull shape factor you enter. When the mast has no vane, or the reports give no directions, the wind rose can be taken from an hourly reanalysis file (the same kind of file as the second long-term reference).
+- A wind resource analysis report for such a project: what each result rests on, the tables as entered, the long-term correction, shear, the wind map, and what is needed to firm the result up. The sections only ten-minute records can fill are left out. The measurement term of the uncertainty is 4 % of wind speed instead of 2.5 %, because nothing behind the monthly means could be checked.
+- Every output of such a project says that it is a first view from summary tables and, where they are used, that the wind directions are a reanalysis's and not the mast's.
+
+### Changed
+- Step 3 writes the reports again, so the project wind summary carries the wind map as soon as there is one.
+
 ## [0.3.1-dev] - 2026-11-21
 
 ### Added
@@ -116,7 +126,8 @@ What changed in each version of Bohemian Wind. The format follows [Keep a Change
 
 Before 0.2.0-dev, Bohemian Wind was a stand-alone data-check window (`qc_main.py`, still included). Its history is not in this repository.
 
-[Unreleased]: https://github.com/MugambiD/bohemian-wind/compare/v0.3.1-dev...HEAD
+[Unreleased]: https://github.com/MugambiD/bohemian-wind/compare/v0.3.2-dev...HEAD
+[0.3.2-dev]: https://github.com/MugambiD/bohemian-wind/compare/v0.3.1-dev...v0.3.2-dev
 [0.3.1-dev]: https://github.com/MugambiD/bohemian-wind/releases/tag/v0.3.1-dev
 [0.3.0-dev]: https://github.com/MugambiD/bohemian-wind/releases/tag/v0.3.0-dev
 [0.2.7-dev]: https://github.com/MugambiD/bohemian-wind/releases/tag/v0.2.7-dev
