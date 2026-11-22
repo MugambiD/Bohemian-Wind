@@ -60,6 +60,7 @@ def _feed_longterm(s: dict) -> dict:
     by_file = cfg.get("source") == "file"          # the files count only when the reference is read from them
     return {"source": "file" if by_file else "download", "monthly_file": cfg.get("monthly_file") if by_file else None,
             "daily_file": cfg.get("daily_file") if by_file else None, "second_file": cfg.get("second_file") or None,
+            **({"second_name": cfg["second_name"]} if cfg.get("second_name") else {}),
             **({"carry": "second"} if cfg.get("carry") == "second" else {})}       # named only when it is not the usual first
 
 
@@ -904,9 +905,12 @@ class Project:
         if cfg.get("second_file"):                 # a second view of the long term, set beside the first
             try:
                 ref2, what = longterm.read_reference_file(self.resolve(cfg["second_file"]))
+                if str(cfg.get("second_name") or "").strip():      # what the file is, in the reader's words: named first
+                    what = f"{str(cfg['second_name']).strip().rstrip('.:')}: {what}"
                 if carry == "second":              # the file's reference is the one carried; the download stands beside it
                     res = longterm.correct(clim, ref2)
-                    res["credit"] = "Long-term index: " + what + "."
+                    res["credit"] = "Long-term index: " + what.split(": ")[0] + "."
+                    res["reference_file"] = what
                     res["reference_first"], res["reference_last"] = str(ref2.index[0]), str(ref2.index[-1])
                     res["second"] = longterm.second_reference(clim, ref, res, longterm.POWER_CREDIT.split(": ", 1)[-1].rstrip(".")
                                                               + f", monthly values, {ref.index[0]} to {ref.index[-1]}")

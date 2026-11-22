@@ -66,6 +66,10 @@ def _complex_model_text(engine: str) -> str:
     if engine == "cfd":
         return ("The wind map comes from a CFD screening run, which resolves steep ground better than linear theory but has "
                 "not yet been checked against a second mast on ground like this.")
+    if engine == "atlas":
+        return ("The wind map follows the Global Wind Atlas, whose microscale step is a linear model on cells of about 250 m "
+                "and is outside its range there; it can misjudge the wind between points a few kilometres apart by far more "
+                "than the screening rule allows.")
     return ("The wind map is a linear screening model and is outside its range there; such models can misjudge the wind "
             "between points a few kilometres apart by far more than the screening rule allows.")
 

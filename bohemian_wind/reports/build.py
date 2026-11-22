@@ -165,7 +165,7 @@ def _meas(src: Source) -> tuple:
 
 def _second_rows(lt: dict) -> list:
     s = lt["second"]
-    return [["First (carried forward): " + lt.get("credit", "").split(": ", 1)[-1].split(" (reanalysis-")[0].rstrip("."), f"{lt['factor']:.3f}", f"{lt['long_term']:.2f}", f"{lt['r']:.2f}",
+    return [["First (carried forward): " + lt.get("credit", "").split(": ", 1)[-1].rstrip("."), f"{lt['factor']:.3f}", f"{lt['long_term']:.2f}", f"{lt['r']:.2f}",
              f"{lt['lt_years'][0]} to {lt['lt_years'][1]}"],
             ["Second: " + s["what"].split(":")[0], f"{s['factor']:.3f}", f"{s['long_term']:.2f}", f"{s['r']:.2f}", f"{s['lt_years'][0]} to {s['lt_years'][1]}"]]
 
@@ -234,7 +234,8 @@ def _long_term(doc, src: Source) -> None:
     if lt:
         doc.p(f"The measured period is short against the life of a wind farm. To place it in the long term, the monthly means of the mast "
               f"are set against a reanalysis reference for the same months. Method: {lt.get('method', 'monthly index')}.")
-        doc.kv([("Reference", lt.get("credit", "")), ("Reference record", f"{lt.get('reference_first', '')[:7]} to {lt.get('reference_last', '')[:7]}"),
+        doc.kv([("Reference", lt.get("credit", "")), *([("Reference file", lt["reference_file"].split(": ", 1)[-1])] if lt.get("reference_file") else []),
+                ("Reference record", f"{lt.get('reference_first', '')[:7]} to {lt.get('reference_last', '')[:7]}"),
                 ("Long-term years", f"{lt['lt_years'][0]} to {lt['lt_years'][1]}"),
                 ("Months used", f"{lt['months']} ({lt['first_month']} to {lt['last_month']}); {lt['calendar_months']} of the twelve calendar months"),
                 ("Monthly correlation", f"r = {lt['r']:.2f}"),
