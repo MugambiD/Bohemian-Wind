@@ -55,6 +55,8 @@ One row per calendar month: join overlapping report periods first. `share` is th
 
 This is a first view, and every output says so. No record is checked, so sensor faults, icing, tower shading and clock errors stay unseen; a reanalysis does not see how terrain turns the wind at the site; the uncertainty carries 4 % for the measurement instead of 2.5 %. Run step 1 again on the records when they arrive.
 
+**What every step leaves behind.** After each step the Word reports in `reports/` are written again. The wind resource analysis always exists once step 1 has run, and opens with a table of the five steps: which are done and when, which are out of date, which have not been run. A Google Earth file is written too: `maps/mast.kmz` (the mast, its wind and its energy rose) until there is a wind map, then `maps/wind_map.kmz` from step 3.
+
 ## 2. Long-term correction
 
 **Does.** Monthly index: the ratio of the reference's 20-year mean of monthly means to its mean over the measured months. Months with under 70 % valid data are left out. Reference months that break the usual mast-to-reference ratio are dropped when they are among the reference's last four (NASA POWER appends a different model for its latest weeks); older months are never dropped, however much a seasonal ratio swings.

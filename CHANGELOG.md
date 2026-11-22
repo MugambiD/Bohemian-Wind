@@ -16,6 +16,8 @@ What changed in each version of Bohemian Wind. The format follows [Keep a Change
 - Step 2 can carry the file's reference forward instead of the downloaded one (`longterm.carry: second` in the project file), with the downloaded one set beside it. The default is unchanged.
 
 ### Changed
+- The wind resource analysis is written after every step and now shows how far the analysis has been taken: a table of the five steps with the stage each has reached (done and when, out of date, or not run yet) and its main result, then the wind map once step 3 has run and the layout, energy and screening in short once steps 4 and 5 have. A step that is out of date is said to be so and its results are left out.
+- Every step leaves a Google Earth file. Before there is a wind map, steps 1 and 2 write `maps/mast.kmz`: the mast, what is known of its wind, and its energy rose. Step 3 writes `maps/wind_map.kmz` with the classed map as before.
 - Step 3 writes the reports again, so the project wind summary carries the wind map as soon as there is one.
 
 ## [0.3.1-dev] - 2026-11-21

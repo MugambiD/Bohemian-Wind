@@ -289,7 +289,8 @@ def wind_resource(project, path, date: datetime | None = None) -> Path:
     doc.control(basis=_basis(src))
     titles = ["Summary", "Introduction", "Site and mast", "Measurement setup", "Measurement data", "Wind statistics",
               "Turbulence, air density and climate", "Long-term correction", "Wind shear and hub heights", "Uncertainty",
-              "Findings of the data checks", "Departures from usual practice", "Data sources"]
+              "Findings of the data checks", "Departures from usual practice", "The wind over the site", "Layout, energy and screening",
+              "Data sources"]
     doc.contents(titles)
 
     # 1 summary
@@ -325,6 +326,8 @@ def wind_resource(project, path, date: datetime | None = None) -> Path:
     doc.flag(NOTICE)
 
     # 2 introduction
+    _stages(doc, src)
+
     doc.h1(titles[1])
     doc.p("The report follows the steps of the analysis: the mast and its instruments, the checks on the data, the wind "
           "statistics of the measured period, the correction to the long term, the shear between the measured heights, "
@@ -524,11 +527,85 @@ def wind_resource(project, path, date: datetime | None = None) -> Path:
 
     # 13 sources
     doc.h1(titles[12])
+    _site_wind(doc, src)
+
+    doc.h1(titles[13])
+    _later_steps(doc, src)
+
+    doc.h1(titles[14])
     credits = list(dict.fromkeys(([lt["credit"]] if lt and lt.get("credit") else []) + ((src.map or {}).get("credits") or [])))
     doc.bullets([f"Mast data: {d.get('format', 'logger files')}, supplied for this project. Input fingerprint and file list: inputs.csv in the run folder."]
                 + credits + [f"Software: Bohemian Wind v{__version__}, open source (MIT licence)."])
     doc.flag(NOTICE)
     return doc.save(path)
+
+
+def _stage_rows(src: Source) -> list:
+    """One row per step of the analysis: its name, how far it is, and its main result so far."""
+    p, c = src.p, src.clim
+
+    def state(step: str) -> str:
+        r = p.result(step)
+        if not r:
+            return "Not run yet"
+        if p.status(step) != "done":
+            return "Out of date: run again"
+        return "Done" + (f", {_day(r['at'])}" if r.get("at") else "")
+
+    mean, what = src.lt_mean()
+    lt, wm, lay, env = src.lt, src.map, src.lay, src.env
+    return [
+        ["1 Mast data", state("data"), f"{c['mean_ws']:.2f} m/s at {c['height_m']:g} m over the valid time; {c['recovery_pct']:.0f} % of the period valid"
+         + ("; from summary tables" if _tables(c) else "")],
+        ["2 Long-term correction", state("longterm"), f"{lt['long_term']:.2f} m/s at {c['height_m']:g} m (factor {lt['factor']:.3f})" if lt else "–"],
+        ["3 Wind map", state("map"), f"{wm['min_ws']:.1f} to {wm['max_ws']:.1f} m/s at {wm['height_m']:g} m, {ENGINES.get(wm['engine'], wm['engine'])}; "
+                                     "Google Earth file written" if wm else "–"],
+        ["4 Layout and energy", state("layout"), f"{lay['n_placed']} turbines, {lay['capacity_mw']:.1f} MW; net P50 {lay['p50_gwh']:.1f} GWh a year" if lay else "–"],
+        ["5 Noise and shadow flicker", state("environment"), f"{env['noise']['over_limit']:,} of {env['noise']['n_receptors']:,} homes above the noise level used" if env else "–"],
+    ]
+
+
+def _stages(doc, src: Source) -> None:
+    doc.table(["Step", "Stage reached", "Result so far"], _stage_rows(src), widths=[4.0, 3.9, 8.0],
+              caption="How far the analysis has been taken", numeric_from=None, size=8)
+    doc.note("This report is written again after every step, and always shows the steps run so far. A step marked out of date rests "
+             "on settings or data that have changed since it ran.")
+
+
+def _site_wind(doc, src: Source, note: str = "") -> None:
+    """The wind map as a report section's body, when step 3 has been run."""
+    wm = src.map
+    if not wm:
+        doc.p("The wind map is out of date and is not shown: run step 3 again. Until then the results above hold at the mast only."
+              if src.p.result("map") else "No wind map has been made yet (step 3). Until then the results above hold at the mast only.")
+        return
+    doc.p(f"The mast's long-term wind was carried over {wm['area_km2']:.0f} km² of terrain with {ENGINES.get(wm['engine'], wm['engine'])}. At "
+          f"{wm['height_m']:g} m above ground the mean wind speed runs from {wm['min_ws']:.1f} to {wm['max_ws']:.1f} m/s over the map. "
+          "The classed map is also written as a Google Earth file (wind_map.kmz) with its key and the mast.")
+    doc.figure(src.p.folder / wm["map_print"] if wm.get("map_print") else None, f"Mean wind speed at {wm['height_m']:g} m above ground", 15.5)
+    if wm.get("warnings"):
+        doc.flag(list(wm["warnings"]), label="Check:")
+    if note:
+        doc.note(note)
+
+
+def _later_steps(doc, src: Source) -> None:
+    """Layout, energy and the screening of noise and shadow flicker, in short: the micrositing report has the detail."""
+    lay, env = src.lay, src.env
+    if lay:
+        doc.p("An indicative layout with a generic turbine has been placed on the wind map. The micrositing report gives the siting "
+              "rules, the positions and the uncertainty in full.")
+        doc.kv(_energy_rows(lay), caption="Energy estimate of the indicative layout")
+    else:
+        doc.p("The layout and its energy estimate are out of date and are not shown: run step 4 again." if src.p.result("layout")
+              else "No layout or energy estimate has been made yet (step 4).")
+    if env:
+        nz, fl = env["noise"], env["flicker"]
+        doc.p(f"Noise and shadow flicker were screened for {nz['n_receptors']:,} homes: {nz['over_limit']:,} are above the {nz['limit_dba']:g} dB(A) "
+              f"level used, and {fl['over_limit']:,} exceed a shadow flicker limit in the astronomical worst case.")
+    else:
+        doc.p("The noise and shadow flicker screening is out of date and is not shown: run step 5 again." if src.p.result("environment")
+              else "Noise and shadow flicker have not been screened yet (step 5).")
 
 
 def _wind_resource_from_tables(src: Source, path, date: datetime | None = None) -> Path:
@@ -545,7 +622,7 @@ def _wind_resource_from_tables(src: Source, path, date: datetime | None = None) 
                  ["First view from monthly summary tables", f"Reported period {_day(c['period'][0])} to {_day(c['period'][1])}"], date)
     doc.control(basis=_basis(src))
     titles = ["Summary", "What this analysis rests on", "Site and mast", "The reported data", "Wind statistics", "Long-term correction",
-              "Wind shear and hub heights", "The wind over the site", "Uncertainty", "Findings", "What is needed to firm this up", "Data sources"]
+              "Wind shear and hub heights", "The wind over the site", "Layout, energy and screening", "Uncertainty", "Findings", "What is needed to firm this up", "Data sources"]
     doc.contents(titles)
     months = d.get("monthly") or [{"month": k, **v} for k, v in sorted((c.get("monthly") or {}).items())]
     usable = sum(1 for m in months if m["share"] >= 0.7)
@@ -582,6 +659,8 @@ def _wind_resource_from_tables(src: Source, path, date: datetime | None = None) 
              + ("the wind directions are a reanalysis's, not the site's. " if not c.get("no_direction") else "no direction is known. ")
              + "The figures show whether the site is worth the next step, and are to be redone from the records.", label="Check:")
     doc.flag(NOTICE)
+
+    _stages(doc, src)
 
     # 2 basis
     doc.h1(titles[1])
@@ -665,20 +744,14 @@ def _wind_resource_from_tables(src: Source, path, date: datetime | None = None) 
 
     # 8 map
     doc.h1(titles[7])
-    if wm:
-        doc.p(f"The mast's long-term wind was carried over {wm['area_km2']:.0f} km² of terrain with {ENGINES.get(wm['engine'], wm['engine'])}. At "
-              f"{wm['height_m']:g} m above ground the mean wind speed runs from {wm['min_ws']:.1f} to {wm['max_ws']:.1f} m/s over the map. "
-              "The classed map is also written as a Google Earth file (wind_map.kmz) with its key and the mast.")
-        doc.figure(src.p.folder / wm["map_print"] if wm.get("map_print") else None, f"Mean wind speed at {wm['height_m']:g} m above ground", 15.5)
-        if wm.get("warnings"):
-            doc.flag(list(wm["warnings"]), label="Check:")
-        doc.note("The map is as good as its anchor: one mast, known here from monthly means, at a position that is "
-                 + ("stated as: " + t["position_basis"] + "." if t.get("position_basis") else "taken as given."))
-    else:
-        doc.p("No wind map has been made yet (step 3).")
+    _site_wind(doc, src, "The map is as good as its anchor: one mast, known here from monthly means, at a position that is "
+               + ("stated as: " + t["position_basis"] + "." if t.get("position_basis") else "taken as given."))
+
+    doc.h1(titles[8])
+    _later_steps(doc, src)
 
     # 9 uncertainty
-    doc.h1(titles[8])
+    doc.h1(titles[9])
     ltp, why = budget.long_term_pct(c.get("calendar_months"), corrected=bool(lt), months=len(c.get("monthly") or {}))
     doc.p("The uncertainty of the long-term mean wind speed is built from independent terms, each one standard deviation in per cent "
           "of the wind speed. They are the developer's working assumptions. The measurement term is larger than for a mast analysed "
@@ -693,11 +766,11 @@ def _wind_resource_from_tables(src: Source, path, date: datetime | None = None) 
              "any energy estimate, not on the mean at the mast.")
 
     # 10 findings
-    doc.h1(titles[9])
+    doc.h1(titles[10])
     doc.bullets([x for x in (d.get("findings") or []) if "not an accredited" not in x][:60] or ["No findings were recorded."])
 
     # 11 next
-    doc.h1(titles[10])
+    doc.h1(titles[11])
     doc.bullets(["The ten-minute records of every channel, with the standard deviations, and the logger's own files and program.",
                  "The installation report: surveyed coordinates, sensor heights, boom lengths and bearings, the mast's cross-section.",
                  "The calibration certificates and the maintenance log, with the cause of every gap.",
@@ -707,7 +780,7 @@ def _wind_resource_from_tables(src: Source, path, date: datetime | None = None) 
     doc.p("An independent assessor would ask for the same before a financing decision.")
 
     # 12 sources
-    doc.h1(titles[11])
+    doc.h1(titles[12])
     credits = list(dict.fromkeys(([lt["credit"]] if lt and lt.get("credit") else []) + ((wm or {}).get("credits") or [])))
     doc.bullets([f"Mast data: {t['source']}, as monthly summary tables. The file entered and its fingerprint: inputs.csv in the run folder."]
                 + ([f"Wind directions: {t['direction']}."] if not c.get("no_direction") else [])

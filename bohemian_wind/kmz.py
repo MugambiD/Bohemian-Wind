@@ -208,7 +208,40 @@ def write(path, grid: Grid, mean_ws: np.ndarray, *, name: str, height_m: float, 
     return path
 
 
-def mast_facts(name: str, site: dict, clim: dict, longterm: dict | None, height_m: float, engine: str, cell_m: float,
+def write_mast(path, *, name: str, mast: dict, sectors: list | None = None, rose_lines: list | None = None, rho: float = 1.225,
+               scale: float = 1.0, facts: list | None = None, rose_km: float = 3.0) -> Path:
+    """The Google Earth file of a project that has no wind map yet: the mast, what is known of its wind when it is
+    clicked, and its energy rose laid on the ground west of it. Step 3 writes the file with the map."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lat, lon = float(mast["lat"]), float(mast["lon"])
+    dlat, dlon = 1.0 / 111_320.0, 1.0 / (111_320.0 * max(0.05, np.cos(np.radians(lat))))
+    files = {}
+    kml = ['<?xml version="1.0" encoding="UTF-8"?>', '<kml xmlns="http://www.opengis.net/kml/2.2"><Document>',
+           f"<name>{_e(name)}</name><open>1</open>", f"<description><![CDATA[{_table(facts or [])}]]></description>",
+           '<Style id="mast"><IconStyle><color>ff00ff00</color><scale>1.3</scale><Icon>'
+           "<href>http://maps.google.com/mapfiles/kml/shapes/donut.png</href></Icon></IconStyle>"
+           "<LabelStyle><scale>1.1</scale></LabelStyle></Style>",
+           f"<LookAt><longitude>{lon:.6f}</longitude><latitude>{lat:.6f}</latitude><altitude>0</altitude><heading>0</heading>"
+           f"<tilt>0</tilt><range>{8000 * rose_km:.0f}</range></LookAt>"]
+    if sectors:
+        files["files/energy_rose.png"] = energy_rose_png(sectors, title=f"Energy rose, {mast.get('label') or 'met mast'}",
+                                                         lines=rose_lines or [], rho=rho, scale=scale)
+        w, h, gap = rose_km * 1000.0, rose_km * 1000.0 * 7.2 / 5.0, 500.0
+        box = {"west": lon - (gap + w) * dlon, "east": lon - gap * dlon, "south": lat - h / 2 * dlat, "north": lat + h / 2 * dlat}
+        kml.append(_ground("Energy rose of the mast", "files/energy_rose.png", box, 2))
+    kml.append(f'<Placemark><name>{_e(mast.get("label") or "Met mast")}</name><styleUrl>#mast</styleUrl>'
+               f"<description><![CDATA[{_table(facts or [])}]]></description>"
+               f"<Point><coordinates>{lon:.6f},{lat:.6f},0</coordinates></Point></Placemark>")
+    kml.append(f"<!-- Bohemian Wind v{_e(__version__)} --></Document></kml>")
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("doc.kml", "".join(kml))
+        for n, data in files.items():
+            z.writestr(n, data)
+    return path
+
+
+def mast_facts(name: str, site: dict, clim: dict, longterm: dict | None, height_m: float, engine: str | None, cell_m: float,
                terrain: str = "") -> tuple:
     """(facts for the click-through table, lines for under the energy rose) from a project's results."""
     u = utm(site["lat"], site["lon"])
@@ -222,8 +255,12 @@ def mast_facts(name: str, site: dict, clim: dict, longterm: dict | None, height_
     cells = f"{cell_m:g} m drawing grid; the atlas's own cells are about 250 m" if engine == "atlas" else f"{cell_m:g} m"
     facts = [("Project", name), ("Met mast", f"{site['lat']:.6f}, {site['lon']:.6f}"),
              ("UTM WGS 84", f"zone {u['zone']}{u['hemisphere']}, {u['easting']:.0f} E, {u['northing']:.0f} N"),
-             ("Measured", period), ("Mean wind speed at the mast", mean), ("Map height", f"{height_m:g} m above ground"),
-             ("Flow model", how), ("Cell size", cells), ("Software", f"Bohemian Wind v{__version__}")]
+             ("Measured", period), ("Mean wind speed at the mast", mean)]
+    if engine:
+        facts += [("Map height", f"{height_m:g} m above ground"), ("Flow model", how), ("Cell size", cells)]
+    else:                                         # no wind map yet: the file shows the mast alone
+        facts.append(("Wind map", "not made yet (step 3): this file shows the mast and its wind only"))
+    facts.append(("Software", f"Bohemian Wind v{__version__}"))
     if clim.get("summary"):                       # step 1 read monthly summary tables (intake/summary.py)
         basis = ("monthly summary tables, no ten-minute record checked"
                  + ("" if clim.get("no_direction") else "; wind directions from a reanalysis, not measured"))
@@ -234,5 +271,6 @@ def mast_facts(name: str, site: dict, clim: dict, longterm: dict | None, height_
              f"Wind data: {mean}",
              f"Measurement period: {period}" + ("; from monthly summary tables" + ("" if clim.get("no_direction") else
                                                  ", directions from a reanalysis") if clim.get("summary") else ""),
-             f"Map: {how}; {'atlas cells of about 250 m' if engine == 'atlas' else f'{cell_m:g} m cells'}; {height_m:g} m above ground" + (f"; {terrain}" if terrain else "")]
+             (f"Map: {how}; {'atlas cells of about 250 m' if engine == 'atlas' else f'{cell_m:g} m cells'}; {height_m:g} m above ground"
+              + (f"; {terrain}" if terrain else "")) if engine else "Wind map: not made yet (step 3)"]
     return facts, lines

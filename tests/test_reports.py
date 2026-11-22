@@ -151,3 +151,51 @@ def test_pdf_copies_come_from_a_program_of_the_computer_or_not_at_all(tmp_path, 
     assert "neither LibreOffice nor Microsoft Word" in said[-1] or "Microsoft Word did not write them" in said[-1]
     monkeypatch.setenv("BW_NO_PDF", "1")
     assert pdf.convert([f], log=said.append) == [] and len(said) == 1
+
+
+def test_every_step_leaves_a_wind_resource_report_of_the_stage_reached_and_a_google_earth_file(tmp_path):
+    docx = pytest.importorskip("docx")
+    import zipfile  # noqa: PLC0415
+    from bohemian_wind import demo  # noqa: PLC0415
+    p = demo.create(tmp_path / "Demo Ridge", today=date(2026, 3, 2))
+
+    def wra() -> str:
+        f = next((p.folder / "reports").glob("Wind_Resource_Analysis_*.docx"))
+        d = docx.Document(str(f))
+        return "\n".join([q.text for q in d.paragraphs] + [" | ".join(c.text for c in r.cells) for t in d.tables for r in t.rows])
+
+    def row(text: str, step: str) -> str:
+        return next(line for line in text.splitlines() if line.startswith(step))
+
+    r = p.run("data", log=lambda m: None)
+    t = wra()
+    assert "How far the analysis has been taken" in t and "Done" in row(t, "1 Mast data")
+    assert all("Not run yet" in row(t, s) for s in ("2 Long-term", "3 Wind map", "4 Layout", "5 Noise"))
+    assert "No wind map has been made yet (step 3)" in t and "No layout or energy estimate has been made yet (step 4)" in t
+    assert p.result("data")["kmz"] == "maps/mast.kmz"                     # no map yet: the mast and its wind alone
+    kml = zipfile.ZipFile(p.folder / "maps" / "mast.kmz").read("doc.kml").decode("utf-8")
+    assert "<Placemark><name>Met mast</name>" in kml and "not made yet (step 3)" in kml and "measured period" in kml
+    assert "files/energy_rose.png" in zipfile.ZipFile(p.folder / "maps" / "mast.kmz").namelist()
+
+    p.run("longterm", log=lambda m: None)
+    t = wra()
+    assert "Done" in row(t, "2 Long-term") and "factor" in row(t, "2 Long-term") and "Not run yet" in row(t, "3 Wind map")
+    assert "long-term corrected" in zipfile.ZipFile(p.folder / "maps" / "mast.kmz").read("doc.kml").decode("utf-8")
+
+    m = p.run("map", log=lambda s: None)
+    t = wra()
+    assert "Done" in row(t, "3 Wind map") and "Google Earth file written" in row(t, "3 Wind map") and "Not run yet" in row(t, "4 Layout")
+    assert "The wind over the site" in t and "wind_map.kmz" in t and m["kmz"] == "maps/wind_map.kmz"
+    assert any(x["file"].startswith("reports/Wind_Resource_Analysis") for x in p.result("map")["reports"])
+
+    p.run("layout", log=lambda s: None)
+    t = wra()
+    lay = p.result("layout")
+    assert "Done" in row(t, "4 Layout") and f"{lay['p50_gwh']:.1f} GWh" in row(t, "4 Layout") and "Energy estimate of the indicative layout" in t
+    p.s["map"]["height_m"] = float(p.s["map"]["height_m"]) + 10          # a setting changed: later steps are out of date
+    p.save()
+    p.run("longterm", log=lambda s: None)
+    t = wra()
+    assert "Out of date" in row(t, "3 Wind map") and "The wind map is out of date and is not shown: run step 3 again" in t
+    assert "The layout and its energy estimate are out of date" in t
+    assert r["version"]

@@ -805,6 +805,33 @@ class Project:
             log(f"Google Earth file not written: {e}")
             return None
 
+    def _mast_kmz(self, step: str, log=print) -> str | None:
+        """Before there is a wind map: the mast, its wind and its energy rose as a Google Earth file, so that every
+        step leaves one. Left alone once an up-to-date wind map has written its own; never stops a step."""
+        try:
+            from . import kmz  # noqa: PLC0415
+            clim, site = self.climate(), self.site()
+            if site.get("lat") is None or site.get("lon") is None:
+                log("Google Earth file not written: the mast's position is not known. Enter it under Site.")
+                return None
+            lt = self.result("longterm") if self.result("longterm") and not self.stale_reason("longterm") else None
+            facts, lines = kmz.mast_facts(self.s["name"], site, clim, lt, 0.0, None, 0.0)
+            p = kmz.write_mast(self.path("maps", "mast.kmz"), name=f"{self.s['name']}: met mast", facts=facts, rose_lines=lines,
+                               mast={"lat": site["lat"], "lon": site["lon"], "label": "Met mast"},
+                               sectors=None if clim.get("no_direction") else clim["sectors"],
+                               rho=float((clim.get("density") or {}).get("mean") or 1.225),
+                               scale=self.speed_scale(clim)["scale"] if lt else 1.0)
+            log(f"Google Earth file (mast only, no wind map yet): {self.rel(p)}.")
+            rel = self.rel(p)
+        except Exception as e:  # noqa: BLE001
+            log(f"Google Earth file not written: {e}")
+            return None
+        r = self.result(step)
+        if r is not None:
+            r["kmz"] = rel
+            self.save()
+        return rel
+
     def _reports(self, step: str, log=print) -> None:
         """Write the Word reports the results allow, and note them on the step's result; never stops a step."""
         try:
@@ -860,6 +887,7 @@ class Project:
         out["signature"] = intake.folder_signature(src)
         out["data_folder"] = str(src)
         out = self._store("data", out)
+        self._mast_kmz("data", log)
         self._reports("data", log)
         return out
 
@@ -940,6 +968,8 @@ class Project:
         for c in res["cautions"]:
             log("  " + c)
         res = self._store("longterm", res)
+        if self.status("map") != "done":           # an up-to-date wind map has its own, fuller file
+            self._mast_kmz("longterm", log)
         self._reports("longterm", log)
         return res
 

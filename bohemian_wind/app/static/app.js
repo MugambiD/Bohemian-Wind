@@ -347,7 +347,7 @@
   // the Google Earth file and the Word reports a step left, as download buttons
   function outputLinks(r) {
     let h = '';
-    if (r.kmz) h += `<a class="btn" href="${fileUrl(r.kmz, r.at)}">Download the Google Earth map (.kmz)</a>`;
+    if (r.kmz) h += `<a class="btn" href="${fileUrl(r.kmz, r.at)}">${/mast\.kmz$/.test(r.kmz) ? 'Download the Google Earth file of the mast (.kmz)' : 'Download the Google Earth map (.kmz)'}</a>`;
     (r.reports || []).forEach(x => { h += `<a class="btn" href="${fileUrl(x.file, r.at)}">${esc(x.what)} (${/\.pdf$/i.test(x.file) ? 'PDF' : 'Word'})</a>`; });
     return h;
   }
