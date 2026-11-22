@@ -59,7 +59,8 @@ def _feed_longterm(s: dict) -> dict:
     cfg = s["longterm"]
     by_file = cfg.get("source") == "file"          # the files count only when the reference is read from them
     return {"source": "file" if by_file else "download", "monthly_file": cfg.get("monthly_file") if by_file else None,
-            "daily_file": cfg.get("daily_file") if by_file else None, "second_file": cfg.get("second_file") or None}
+            "daily_file": cfg.get("daily_file") if by_file else None, "second_file": cfg.get("second_file") or None,
+            **({"carry": "second"} if cfg.get("carry") == "second" else {})}       # named only when it is not the usual first
 
 
 def _feed_map(s: dict) -> dict:
@@ -169,7 +170,7 @@ def defaults() -> dict:
                  # periods a logger's clock was wrong, as written: [{"from": "2025-03-10 14:40", "to": "2025-04-02 09:10",
                  # "minutes": 60, "program": "<logger program, optional>", "note": "why"}]
                  "clock_corrections": []},
-        "longterm": {"source": "power", "monthly_file": "", "daily_file": "", "second_file": ""},
+        "longterm": {"source": "power", "monthly_file": "", "daily_file": "", "second_file": "", "carry": "first"},
         # 50 m cells: on a real ridge the crests were narrower than 100 m cells, and a layout lost several per cent of its energy
         "map": {"engine": "linear", "height_m": 120.0, "half_km": 8.0, "res_m": 50.0, "z0_m": 0.05, "gwa_dir": "",
                 # CFD cell size over the map: quick 200 m, standard 100 m, fine 50 m (bohemian_wind.flow.cfd)
@@ -889,6 +890,11 @@ class Project:
                 files = longterm.fetch_power(site["lat"], site["lon"], self.path("longterm", "x").parent, period=period)
             except longterm.ReferenceError_ as e:
                 raise ProjectError(str(e)) from e
+        carry = str(cfg.get("carry") or "first")
+        if carry not in ("first", "second"):
+            raise ProjectError(f"Which reference is carried forward must be 'first' or 'second', not {carry!r}.")
+        if carry == "second" and not cfg.get("second_file"):
+            raise ProjectError("To carry the second reference forward, give its file; or set the first to be carried.")
         try:
             ref = longterm.read_power(files["monthly"], files.get("daily"))
             res = longterm.correct(clim, ref)
@@ -898,7 +904,15 @@ class Project:
         if cfg.get("second_file"):                 # a second view of the long term, set beside the first
             try:
                 ref2, what = longterm.read_reference_file(self.resolve(cfg["second_file"]))
-                res["second"] = longterm.second_reference(clim, ref2, res, what)
+                if carry == "second":              # the file's reference is the one carried; the download stands beside it
+                    res = longterm.correct(clim, ref2)
+                    res["credit"] = "Long-term index: " + what + "."
+                    res["reference_first"], res["reference_last"] = str(ref2.index[0]), str(ref2.index[-1])
+                    res["second"] = longterm.second_reference(clim, ref, res, longterm.POWER_CREDIT.split(": ", 1)[-1].rstrip(".")
+                                                              + f", monthly values, {ref.index[0]} to {ref.index[-1]}")
+                    res["carried"] = "second"
+                else:
+                    res["second"] = longterm.second_reference(clim, ref2, res, what)
             except (ValueError, KeyError) as e:
                 raise ProjectError(f"The second long-term reference could not be used: {e}. Take the file out of the "
                                    "settings to run without it.") from e

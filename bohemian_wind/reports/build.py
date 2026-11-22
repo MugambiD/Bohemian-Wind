@@ -165,7 +165,7 @@ def _meas(src: Source) -> tuple:
 
 def _second_rows(lt: dict) -> list:
     s = lt["second"]
-    return [["First: " + lt.get("credit", "").split(": ", 1)[-1].rstrip("."), f"{lt['factor']:.3f}", f"{lt['long_term']:.2f}", f"{lt['r']:.2f}",
+    return [["First (carried forward): " + lt.get("credit", "").split(": ", 1)[-1].split(" (reanalysis-")[0].rstrip("."), f"{lt['factor']:.3f}", f"{lt['long_term']:.2f}", f"{lt['r']:.2f}",
              f"{lt['lt_years'][0]} to {lt['lt_years'][1]}"],
             ["Second: " + s["what"].split(":")[0], f"{s['factor']:.3f}", f"{s['long_term']:.2f}", f"{s['r']:.2f}", f"{s['lt_years'][0]} to {s['lt_years'][1]}"]]
 
@@ -248,7 +248,8 @@ def _long_term(doc, src: Source) -> None:
             doc.h2("A second reference")
             doc.p(f"The correction was made again with a second, independent reanalysis series ({s2['what']}). It puts the long-term mean at "
                   f"{s2['long_term']:.2f} m/s, {s2['difference_pct']:+.1f} % from the first. The first reference's mean is the one carried "
-                  f"forward; the mean of the two would be {s2['mean_of_two']:.2f} m/s. The distance between them sets the reference term of "
+                  f"forward{' (here the reference read from a file was chosen to be carried, and the downloaded one is set beside it)' if lt.get('carried') == 'second' else ''}"
+                  f"; the mean of the two would be {s2['mean_of_two']:.2f} m/s. The distance between them sets the reference term of "
                   f"the uncertainty: {_ref_pct(src):.1f} % of the wind speed.")
             doc.table(["Reference", "Long-term factor", f"Long-term mean at {lt['height_m']:g} m, m/s", "Monthly r", "Long-term years"],
                       _second_rows(lt), widths=[6.4, 2.2, 3.0, 1.8, 2.5], caption="The two long-term references side by side")

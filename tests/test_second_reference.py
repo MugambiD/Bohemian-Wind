@@ -128,3 +128,22 @@ def test_a_changed_or_unreadable_second_file_is_noticed(project):
         project.run("longterm", log=lambda m: None)
     project.update("longterm", {"second_file": ""})
     assert "second" not in project.run("longterm", log=lambda m: None)
+
+
+def test_the_file_reference_can_be_the_one_carried_forward(project):
+    f = _second_file(project, 1.05, "carried.csv")
+    project.s["longterm"]["second_file"] = str(f)
+    project.run("longterm", log=lambda m: None)
+    usual = project.result("longterm")
+    project.s["longterm"]["carry"] = "second"
+    assert project.stale_reason("longterm")                                    # the choice belongs to the settings the result rests on
+    project.run("longterm", log=lambda m: None)
+    lt = project.result("longterm")
+    assert lt["carried"] == "second" and "carried.csv" in lt["credit"]
+    assert lt["long_term"] == pytest.approx(usual["second"]["long_term"]) and lt["second"]["long_term"] == pytest.approx(usual["long_term"])
+    assert lt["second"]["difference_pct"] == pytest.approx(100 * (usual["long_term"] / usual["second"]["long_term"] - 1))
+    assert "MERRA-2" in lt["second"]["what"]
+    project.s["longterm"].update(second_file="", carry="second")
+    with pytest.raises(Exception, match="give its file"):
+        project.run("longterm", log=lambda m: None)
+    project.s["longterm"]["carry"] = "first"
