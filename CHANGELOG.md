@@ -12,16 +12,14 @@ What changed in each version of Bohemian Wind. The format follows [Keep a Change
 - Step 1 from monthly summary tables, for a mast known only from reports. A small file, `wind_summary.json`, holds the mean wind speed per height and month and the valid share of each month; step 1 reads it in place of logger files and the later steps run as usual. The shape of the wind speed distribution is one Weibull shape factor you enter. When the mast has no vane, or the reports give no directions, the wind rose can be taken from an hourly reanalysis file (the same kind of file as the second long-term reference).
 - A wind resource analysis report for such a project: what each result rests on, the tables as entered, the long-term correction, shear, the wind map, and what is needed to firm the result up. The sections only ten-minute records can fill are left out. The measurement term of the uncertainty is 4 % of wind speed instead of 2.5 %, because nothing behind the monthly means could be checked.
 - Every output of such a project says that it is a first view from summary tables and, where they are used, that the wind directions are a reanalysis's and not the mast's.
-
 - Step 2 can carry the file's reference forward instead of the downloaded one (`longterm.carry: second` in the project file), with the downloaded one set beside it. The default is unchanged.
 - `docs/release-checks.md`: the checks a build must pass on a real Windows PC before it stops being a pilot.
 
 ### Fixed
 - A reference file of your own (the second long-term reference, and the wind-rose file of a summary-tables project) is now refused when it holds more than one location, or the same time step twice with different wind speeds. Before, the first row of each time step was taken, so the same file gave a different wind by the order of its rows, with no warning. Found by an outside review of 0.3.1-dev.
+- Such a file is also refused when a wind speed is negative, infinite or above 75 m/s. The point the file was read at is now named in the result.
 - The compass names beside the wind rose: 45°, 135°, 225° and 315° were shown as ENE, SSE, WSW and NNW, and are now NE, SE, SW and NW.
 - The Google Earth files carry their own marker icons for the mast and the turbines, and no longer fetch them from the web, so they show the intended symbols offline.
-- Such a file is also refused when a wind speed is negative, infinite or above 75 m/s. The point the file was read at is now named in the result.
-
 - A test of unpacking deep archives failed on a PC whose test folder was itself deep: it now builds its own long-path fixture in the form Windows accepts. Unpacking itself was not at fault.
 
 ### Changed
