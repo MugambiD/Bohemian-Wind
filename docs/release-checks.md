@@ -1,6 +1,6 @@
 # Windows release checks
 
-A build is a **pilot** until every check below has been made on a real Windows PC and written down here. The
+A build is released only after every check below has been made on a real Windows PC and written down here. The
 automated tests on GitHub run on clean Windows and Linux machines; they do not show what happens on a user's PC
 with an ordinary account, an earlier version installed, antivirus software and Microsoft Word.
 
