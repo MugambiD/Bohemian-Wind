@@ -147,3 +147,65 @@ def test_the_file_reference_can_be_the_one_carried_forward(project):
     with pytest.raises(Exception, match="give its file"):
         project.run("longterm", log=lambda m: None)
     project.s["longterm"]["carry"] = "first"
+
+
+def _rows(tmp_path, name, frame):
+    f = tmp_path / name
+    frame.to_csv(f, index=False)
+    return f
+
+
+def test_a_reference_file_is_one_point_and_its_wind_speeds_can_be_wind_speeds(tmp_path):
+    """Outside review, 23 Nov 2026: a file with two locations gave 4 or 12 m/s by the order of its rows, and negative
+    and infinite wind speeds were taken in. Every such file is now refused with the reason."""
+    from bohemian_wind.intake import summary  # noqa: PLC0415
+    t = pd.date_range("2020-01-01", "2022-12-31 23:00", freq="h")
+    a = pd.DataFrame({"valid_time": t, "ws100": 4.0, "latitude": -1.0, "longitude": 30.0})
+    b = pd.DataFrame({"valid_time": t, "ws100": 12.0, "latitude": -1.25, "longitude": 30.0})
+    for n, frame in (("ab.csv", pd.concat([a, b])), ("ba.csv", pd.concat([b, a]))):             # either order: refused
+        with pytest.raises(ValueError, match="holds 2 locations"):
+            longterm.read_reference_file(_rows(tmp_path, n, frame))
+    both = pd.concat([a, b]).drop(columns=["latitude", "longitude"])                             # no position columns: caught by the times
+    with pytest.raises(ValueError, match="more than once with different wind speeds"):
+        longterm.read_reference_file(_rows(tmp_path, "nopos.csv", both))
+    monthly, what = longterm.read_reference_file(_rows(tmp_path, "twice.csv", pd.concat([a, a])))   # the same rows twice are one series
+    assert monthly.mean() == pytest.approx(4.0) and "at -1, 30" in what
+    for n, col, value, why in (("neg.csv", "ws100", -3.0, "negative"), ("inf.csv", "ws100", np.inf, "infinite"), ("big.csv", "ws100", 400.0, "above 75")):
+        bad = a.copy()
+        bad.loc[100:140, col] = value
+        with pytest.raises(ValueError, match=why):
+            longterm.read_reference_file(_rows(tmp_path, n, bad))
+    uv = pd.DataFrame({"valid_time": t, "u100": -3.0, "v100": 4.0})                                  # components may be negative
+    assert longterm.read_reference_file(_rows(tmp_path, "uv.csv", uv))[0].mean() == pytest.approx(5.0)
+    uv.loc[5, "u100"] = -np.inf
+    with pytest.raises(ValueError, match="infinite"):
+        longterm.read_reference_file(_rows(tmp_path, "uvinf.csv", uv))
+    # the same rules for the file a summary-tables project takes its wind rose from
+    two = pd.concat([a.assign(u100=-4.0, v100=0.0), b.assign(u100=0.0, v100=-12.0)])
+    with pytest.raises(summary.SummaryError, match="holds 2 locations"):
+        summary.read_directions(_rows(tmp_path, "rose2.csv", two))
+    with pytest.raises(summary.SummaryError, match="more than once"):
+        summary.read_directions(_rows(tmp_path, "rose3.csv", two.drop(columns=["latitude", "longitude"])))
+
+
+def test_the_outside_reviews_five_files_read_as_its_acceptance_asks():
+    """The five synthetic files of the review of 0.3.1-dev (23 Nov 2026): the control reads, the others are refused,
+    and the two row orders of the two-location file end the same way."""
+    here = Path(__file__).parent / "fixtures" / "reference_review"
+    monthly, _ = longterm.read_reference_file(here / "control.csv")
+    assert monthly.mean() == pytest.approx(6.0) and len(monthly) == 24
+    said = {}
+    for name, why in (("negative", "negative"), ("infinite", "infinite"), ("A-first", "holds 2 locations"), ("B-first", "holds 2 locations")):
+        with pytest.raises(ValueError, match=why) as e:
+            longterm.read_reference_file(here / f"{name}.csv")
+        said[name] = str(e.value).replace(f"{name}.csv", "")
+    assert said["A-first"].replace("lon 36; lon 37", "") == said["B-first"].replace("lon 37; lon 36", "")
+
+
+def test_the_google_earth_files_carry_their_own_marker_icons(tmp_path):
+    from bohemian_wind import kmz  # noqa: PLC0415
+    f = kmz.write_mast(tmp_path / "mast.kmz", name="Invented", mast={"lat": -1.0, "lon": 30.0}, facts=[("Project", "Invented")])
+    z = zipfile.ZipFile(f)
+    kml = z.read("doc.kml").decode("utf-8")
+    assert "http://" not in kml.replace("http://www.opengis.net/kml/2.2", "") and "files/icon_mast.png" in z.namelist()
+    assert z.read("files/icon_mast.png")[:8] == b"\x89PNG\r\n\x1a\n"

@@ -15,6 +15,12 @@ What changed in each version of Bohemian Wind. The format follows [Keep a Change
 
 - Step 2 can carry the file's reference forward instead of the downloaded one (`longterm.carry: second` in the project file), with the downloaded one set beside it. The default is unchanged.
 
+### Fixed
+- A reference file of your own (the second long-term reference, and the wind-rose file of a summary-tables project) is now refused when it holds more than one location, or the same time step twice with different wind speeds. Before, the first row of each time step was taken, so the same file gave a different wind by the order of its rows, with no warning. Found by an outside review of 0.3.1-dev.
+- The compass names beside the wind rose: 45°, 135°, 225° and 315° were shown as ENE, SSE, WSW and NNW, and are now NE, SE, SW and NW.
+- The Google Earth files carry their own marker icons for the mast and the turbines, and no longer fetch them from the web, so they show the intended symbols offline.
+- Such a file is also refused when a wind speed is negative, infinite or above 75 m/s. The point the file was read at is now named in the result.
+
 ### Changed
 - The wind resource analysis is written after every step and now shows how far the analysis has been taken: a table of the five steps with the stage each has reached (done and when, out of date, or not run yet) and its main result, then the wind map once step 3 has run and the layout, energy and screening in short once steps 4 and 5 have. A step that is out of date is said to be so and its results are left out.
 - Every step leaves a Google Earth file. Before there is a wind map, steps 1 and 2 write `maps/mast.kmz`: the mast, what is known of its wind, and its energy rose. Step 3 writes `maps/wind_map.kmz` with the classed map as before.

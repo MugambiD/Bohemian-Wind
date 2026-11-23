@@ -151,18 +151,20 @@ def write(path, grid: Grid, mean_ws: np.ndarray, *, name: str, height_m: float, 
     W, H, gap = x1 - x0, y1 - y0, 0.006 * (x1 - x0)
     b = _box(grid, x0, x1, y0, y1)
     files = {"files/wind_map.png": overlay_png(mean_ws), "files/legend.png": legend_png(height_m),
-             "files/height_sign.png": sign_png(height_m)}
+             "files/height_sign.png": sign_png(height_m), "files/icon_mast.png": icon_png("mast")}
+    if turbines:
+        files["files/icon_turbine.png"] = icon_png("turbine")
     legend_box = _box(grid, x1 + gap, x1 + gap + H * 2.3 / 9.6, y0, y1)              # the pictures keep their own proportions
     sign_box = _box(grid, x1 - 0.055 * H * 2.6 / 0.72, x1, y1 + gap, y1 + gap + 0.055 * H)
     kml = ['<?xml version="1.0" encoding="UTF-8"?>',
            '<kml xmlns="http://www.opengis.net/kml/2.2"><Document>',
            f"<name>{_e(name)}</name><open>1</open>",
            f"<description><![CDATA[{_table(facts or [])}]]></description>",
-           '<Style id="mast"><IconStyle><color>ff00ff00</color><scale>1.3</scale><Icon>'
-           "<href>http://maps.google.com/mapfiles/kml/shapes/donut.png</href></Icon></IconStyle>"
+           '<Style id="mast"><IconStyle><scale>1.3</scale><Icon>'
+           "<href>files/icon_mast.png</href></Icon></IconStyle>"
            "<LabelStyle><scale>1.1</scale></LabelStyle></Style>",
-           '<Style id="turbine"><IconStyle><color>ffffffff</color><scale>1.0</scale><Icon>'
-           "<href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon></IconStyle>"
+           '<Style id="turbine"><IconStyle><scale>1.0</scale><Icon>'
+           "<href>files/icon_turbine.png</href></Icon></IconStyle>"
            "<LabelStyle><scale>0.9</scale></LabelStyle></Style>",
            '<Style id="area"><LineStyle><color>ff000000</color><width>3</width></LineStyle><PolyStyle><fill>0</fill></PolyStyle></Style>',
            f"<LookAt><longitude>{(b['east'] + b['west']) / 2:.6f}</longitude><latitude>{(b['north'] + b['south']) / 2:.6f}</latitude>"
@@ -208,6 +210,24 @@ def write(path, grid: Grid, mean_ws: np.ndarray, *, name: str, height_m: float, 
     return path
 
 
+def icon_png(kind: str) -> bytes:
+    """The mast's and the turbines' markers, drawn here and packed into the file, so that it shows its own symbols
+    with no connection: a green ring for the mast, a white disc with a dark rim for a turbine."""
+    from PIL import Image, ImageDraw  # noqa: PLC0415
+    n = 128
+    im = Image.new("RGBA", (n, n), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    if kind == "mast":
+        d.ellipse((10, 10, n - 10, n - 10), outline=(0, 0, 0, 255), width=30)
+        d.ellipse((16, 16, n - 16, n - 16), outline=(0, 230, 0, 255), width=18)
+    else:
+        d.ellipse((22, 22, n - 22, n - 22), fill=(255, 255, 255, 255), outline=(0, 0, 0, 255), width=10)
+        d.ellipse((52, 52, n - 52, n - 52), fill=(0, 0, 0, 255))
+    out = io.BytesIO()
+    im.save(out, "PNG")
+    return out.getvalue()
+
+
 def write_mast(path, *, name: str, mast: dict, sectors: list | None = None, rose_lines: list | None = None, rho: float = 1.225,
                scale: float = 1.0, facts: list | None = None, rose_km: float = 3.0) -> Path:
     """The Google Earth file of a project that has no wind map yet: the mast, what is known of its wind when it is
@@ -216,11 +236,11 @@ def write_mast(path, *, name: str, mast: dict, sectors: list | None = None, rose
     path.parent.mkdir(parents=True, exist_ok=True)
     lat, lon = float(mast["lat"]), float(mast["lon"])
     dlat, dlon = 1.0 / 111_320.0, 1.0 / (111_320.0 * max(0.05, np.cos(np.radians(lat))))
-    files = {}
+    files = {"files/icon_mast.png": icon_png("mast")}
     kml = ['<?xml version="1.0" encoding="UTF-8"?>', '<kml xmlns="http://www.opengis.net/kml/2.2"><Document>',
            f"<name>{_e(name)}</name><open>1</open>", f"<description><![CDATA[{_table(facts or [])}]]></description>",
-           '<Style id="mast"><IconStyle><color>ff00ff00</color><scale>1.3</scale><Icon>'
-           "<href>http://maps.google.com/mapfiles/kml/shapes/donut.png</href></Icon></IconStyle>"
+           '<Style id="mast"><IconStyle><scale>1.3</scale><Icon>'
+           "<href>files/icon_mast.png</href></Icon></IconStyle>"
            "<LabelStyle><scale>1.1</scale></LabelStyle></Style>",
            f"<LookAt><longitude>{lon:.6f}</longitude><latitude>{lat:.6f}</latitude><altitude>0</altitude><heading>0</heading>"
            f"<tilt>0</tilt><range>{8000 * rose_km:.0f}</range></LookAt>"]

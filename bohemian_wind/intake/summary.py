@@ -118,7 +118,7 @@ def _momm(months: dict, h: float, min_share: float = _climate.MIN_MONTH_SHARE) -
 def read_directions(path) -> pd.DataFrame:
     """Hourly (or finer) reference wind: columns ws (m/s) and wd (degrees the wind comes from). Reads a CSV, or a
     zip holding one, with a time column and either u/v components or a speed and a direction."""
-    from ..longterm import PAIR_NAMES, TIME_NAMES  # noqa: PLC0415
+    from ..longterm import PAIR_NAMES, TIME_NAMES, checked_speed, checked_speed_or_component, one_location  # noqa: PLC0415
     path = Path(path)
     if not path.is_file():
         raise SummaryError(f"The direction file was not found: {path.name}.")
@@ -136,19 +136,29 @@ def read_directions(path) -> pd.DataFrame:
     except (OSError, ValueError, pd.errors.ParserError) as e:
         raise SummaryError(f"The direction file {path.name} could not be read: {e}") from e
     low = {str(c).strip().lower(): c for c in df.columns}
-    if not any(n in low for n in TIME_NAMES):
+    tcol = next((low[n] for n in TIME_NAMES if n in low), None)
+    if tcol is None:
         raise SummaryError(f"The direction file {path.name} has no time column ({', '.join(TIME_NAMES)}).")
-    for a, b in PAIR_NAMES:
-        if a in low and b in low:
-            u, v = pd.to_numeric(df[low[a]], errors="coerce"), pd.to_numeric(df[low[b]], errors="coerce")
-            out = pd.DataFrame({"ws": np.hypot(u, v), "wd": np.degrees(np.arctan2(-u, -v)) % 360.0})
-            break
-    else:
-        d = next((low[n] for n in ("wind_direction_100m", "wd100", "wind_direction", "wd", "direction") if n in low), None)
-        s = next((low[n] for n in ("wind_speed_100m", "ws100", "wind_speed", "ws", "speed") if n in low), None)
-        if d is None or s is None:
-            raise SummaryError(f"The direction file {path.name} needs the wind as u and v components, or as a speed and a direction.")
-        out = pd.DataFrame({"ws": pd.to_numeric(df[s], errors="coerce"), "wd": pd.to_numeric(df[d], errors="coerce") % 360.0})
+    d = next((low[n] for n in ("wind_direction_100m", "wd100", "wind_direction", "wd", "direction") if n in low), None)
+    sp = next((low[n] for n in ("wind_speed_100m", "ws100", "wind_speed", "ws", "speed") if n in low), None)
+    pair = next(((low[a], low[b]) for a, b in PAIR_NAMES if a in low and b in low), None)
+    if pair is None and (d is None or sp is None):
+        raise SummaryError(f"The direction file {path.name} needs the wind as u and v components, or as a speed and a direction.")
+    try:
+        one_location(df, low, path.name)                     # one point, or which wind is read would hang on the row order
+        again = int(df[tcol].duplicated().sum())
+        if again:
+            raise ValueError(f"{path.name}: {again:,} time steps appear more than once. The table seems to hold more than one "
+                             "location or series: keep one")
+        if pair is not None:
+            u = checked_speed_or_component(df[pair[0]], path.name, f"component {pair[0]}")
+            v = checked_speed_or_component(df[pair[1]], path.name, f"component {pair[1]}")
+            out = pd.DataFrame({"ws": checked_speed(np.hypot(u, v), path.name, "wind speed"), "wd": np.degrees(np.arctan2(-u, -v)) % 360.0})
+        else:
+            out = pd.DataFrame({"ws": checked_speed(pd.to_numeric(df[sp], errors="coerce"), path.name, f"wind speed column {sp}"),
+                                "wd": pd.to_numeric(df[d], errors="coerce") % 360.0})
+    except ValueError as e:
+        raise SummaryError(f"The direction file cannot be used: {e}.") from e
     out = out.dropna()
     if len(out) < 24 * 365:
         raise SummaryError(f"The direction file {path.name} holds {len(out):,} records: at least a year of hourly wind is needed for a rose.")

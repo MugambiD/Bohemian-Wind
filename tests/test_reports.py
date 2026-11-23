@@ -44,7 +44,9 @@ def test_kmz_holds_the_map_its_key_the_rose_the_mast_and_the_turbines(tmp_path):
                   sectors=sectors, rose_lines=lines, facts=facts,
                   turbines=[{"id": "T01", "lat": -10.01, "lon": 30.01, "free_ws": 7.9, "gross_mwh": 20000.0, "p50_mwh": 18000.0}])
     z = zipfile.ZipFile(p)
-    assert set(z.namelist()) == {"doc.kml", "files/wind_map.png", "files/legend.png", "files/height_sign.png", "files/energy_rose.png"}
+    assert set(z.namelist()) == {"doc.kml", "files/wind_map.png", "files/legend.png", "files/height_sign.png", "files/energy_rose.png",
+                                 "files/icon_mast.png", "files/icon_turbine.png"}          # its own marker icons: nothing fetched from the web
+    assert "maps.google.com" not in z.read("doc.kml").decode("utf-8")
     text = z.read("doc.kml").decode("utf-8")
     dom = minidom.parseString(text)
     assert len(dom.getElementsByTagName("GroundOverlay")) == 4

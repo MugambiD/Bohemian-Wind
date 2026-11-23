@@ -59,7 +59,7 @@
   const monthName = s => { const m = /^(\d{4})-(\d{2})/.exec(String(s)); return m ? `${MONTHS[Number(m[2]) - 1]} ${m[1]}` : String(s); };
   const fileUrl = (rel, v) => '/files/' + TOKEN + '/' + String(rel).split('/').map(encodeURIComponent).join('/') + (v ? '?v=' + encodeURIComponent(v) : '');
   const stepOf = key => S.project.steps.find(s => s.key === key);
-  const compass = deg => ['N', 'NNE', 'ENE', 'E', 'ESE', 'SSE', 'S', 'SSW', 'WSW', 'W', 'WNW', 'NNW'][Math.round(((deg % 360) + 360) % 360 / 30) % 12];
+  const compass = deg => ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'][Math.round(((deg % 360) + 360) % 360 / 22.5) % 16];
 
   async function api(path, body) {
     const opt = { headers: { 'X-BW-Token': TOKEN, 'X-BW-Page': PAGE } };

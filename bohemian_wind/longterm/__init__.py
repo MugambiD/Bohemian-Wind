@@ -181,6 +181,66 @@ PAIR_NAMES = (("u100", "v100"), ("100m_u_component_of_wind", "100m_v_component_o
 SECOND_MONTH_SHARE = 0.95      # a month of the second reference counts when this share of its time steps is there
 
 
+LAT_NAMES = ("latitude", "lat", "y")
+LON_NAMES = ("longitude", "lon", "long", "lng", "x")
+MAX_REFERENCE_SPEED = 75.0     # m/s: above any hourly mean wind a reanalysis gives; a larger value is a unit or column error
+
+
+def one_location(df: pd.DataFrame, cols: dict, name: str) -> str:
+    """A reference is the wind at one point. A table with a latitude and a longitude column must hold one pair of
+    them: with two, which point's wind is read would depend on the order of the rows. Returns the point as text
+    ("" when the table has no such columns)."""
+    la = next((cols[n] for n in LAT_NAMES if n in cols), None)
+    lo = next((cols[n] for n in LON_NAMES if n in cols), None)
+    have = {k: pd.to_numeric(df[c], errors="coerce").round(4) for k, c in (("lat", la), ("lon", lo)) if c is not None}
+    if not have:
+        return ""
+    pts = pd.DataFrame(have).dropna().drop_duplicates()
+    if len(pts) > 1:
+        shown = "; ".join(", ".join(f"{k} {getattr(r, k):g}" for k in have) for r in pts.head(4).itertuples())
+        raise ValueError(f"{name} holds {len(pts)} locations ({shown}{' ...' if len(pts) > 4 else ''}). A reference is the wind at one "
+                         "point: keep the rows of the point nearest the mast and take the others out")
+    return ", ".join(f"{getattr(pts.iloc[0], k):g}" for k in have) if len(pts) and len(have) == 2 else ""
+
+
+def checked_speed(speed, name: str, what: str) -> np.ndarray:
+    """Wind speeds as numbers, refused when they cannot be wind speeds: infinite, negative, or beyond any mean wind."""
+    v = np.asarray(speed, dtype=float)
+    bad = np.isinf(v)
+    if bad.any():
+        raise ValueError(f"{name}: {int(bad.sum()):,} values of the {what} are infinite. Check the file before using it")
+    ok = v[~np.isnan(v)]
+    if (ok < 0).any():
+        raise ValueError(f"{name}: {int((ok < 0).sum()):,} wind speeds are negative. Check which column holds the wind speed")
+    if (ok > MAX_REFERENCE_SPEED).any():
+        raise ValueError(f"{name}: {int((ok > MAX_REFERENCE_SPEED).sum()):,} wind speeds are above {MAX_REFERENCE_SPEED:g} m/s. "
+                         "Check the column and its unit (m/s)")
+    return v
+
+
+def checked_speed_or_component(col, name: str, what: str) -> np.ndarray:
+    """A wind component as numbers: it may be negative, never infinite."""
+    v = np.asarray(pd.to_numeric(col, errors="coerce"), dtype=float)
+    if np.isinf(v).any():
+        raise ValueError(f"{name}: {int(np.isinf(v).sum()):,} values of the {what} are infinite. Check the file before using it")
+    return v
+
+
+def one_series(s: pd.Series, name: str) -> pd.Series:
+    """One value per time step. The same time twice with the same value is a repeated row and is dropped; with
+    different values the table holds more than one series, and which one is read must not hang on the row order."""
+    s = s[s.index.notna()].sort_index(kind="stable")
+    dup = s.index.duplicated(keep=False)
+    if dup.any():
+        spread = s[dup].groupby(level=0).agg(lambda x: float(x.max() - x.min()))
+        clash = int((spread > 1e-6).sum())
+        if clash:
+            raise ValueError(f"{name}: {clash:,} time steps appear more than once with different wind speeds. The table seems to hold "
+                             "more than one location or series: keep one")
+        s = s[~s.index.duplicated()]
+    return s
+
+
 def read_reference_file(path) -> tuple:
     """A reference series from a table of your own: (monthly means as a period-indexed Series, what was read).
 
@@ -211,20 +271,21 @@ def read_reference_file(path) -> tuple:
     if tcol is None:
         raise ValueError(f"{p.name} has no time column (looked for: {', '.join(TIME_NAMES)})")
     when = pd.to_datetime(df[tcol], errors="coerce", utc=True).dt.tz_localize(None)
+    point = one_location(df, cols, p.name)
     pair = next(((cols[a], cols[b]) for a, b in PAIR_NAMES if a in cols and b in cols), None)
     scol = next((cols[n] for n in SPEED_NAMES if n in cols), None)
     if pair is not None:
-        speed = np.hypot(pd.to_numeric(df[pair[0]], errors="coerce"), pd.to_numeric(df[pair[1]], errors="coerce"))
+        u = checked_speed(np.abs(checked_speed_or_component(df[pair[0]], p.name, f"component {pair[0]}")), p.name, f"component {pair[0]}")
+        v = checked_speed(np.abs(checked_speed_or_component(df[pair[1]], p.name, f"component {pair[1]}")), p.name, f"component {pair[1]}")
+        speed = checked_speed(np.hypot(u, v), p.name, "wind speed")
         what = f"wind speed from the components {pair[0]} and {pair[1]}"
     elif scol is not None:
-        speed = pd.to_numeric(df[scol], errors="coerce")
+        speed = checked_speed(pd.to_numeric(df[scol], errors="coerce"), p.name, f"wind speed column {scol}")
         what = f"wind speed column {scol}"
     else:
         raise ValueError(f"{p.name} has neither a wind speed column nor the two wind components "
                          f"(looked for: {', '.join(SPEED_NAMES[:5])} ...; u100 and v100 ...)")
-    s = pd.Series(np.asarray(speed, dtype=float), index=pd.DatetimeIndex(when)).dropna()
-    s = s[s.index.notna()].sort_index()
-    s = s[~s.index.duplicated()]
+    s = one_series(pd.Series(np.asarray(speed, dtype=float), index=pd.DatetimeIndex(when)).dropna(), p.name)
     if len(s) < 12:
         raise ValueError(f"{p.name} holds {len(s)} usable values: too few for a reference")
     step = float(np.median((s.index[1:] - s.index[:-1]).total_seconds())) / 3600.0      # hours between values
@@ -237,7 +298,8 @@ def read_reference_file(path) -> tuple:
         kind = "hourly values" if step <= 1.01 else "daily values" if abs(step - 24) < 0.5 else f"values every {step:g} hours"
     if len(monthly) < 24:
         raise ValueError(f"{p.name} gives {len(monthly)} complete months: a reference needs years")
-    return monthly.sort_index(), f"{name}: {what}, {kind}, {monthly.index[0]} to {monthly.index[-1]}"
+    return monthly.sort_index(), (f"{name}: {what}, {kind}, {monthly.index[0]} to {monthly.index[-1]}"
+                                  + (f", at {point}" if point else ""))
 
 
 def second_reference(clim: dict, ref2: pd.Series, primary: dict, what: str) -> dict:
