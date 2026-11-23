@@ -185,4 +185,4 @@ If Bohemian Wind helps your work, please cite it with the details in [CITATION.c
 
 ---
 
-<p align="center">Built by <b>Bohemian Renewables (Africa)</b>, Kenya.</p>
+<p align="center">Built and maintained by <b>Bohemian Renewables (Africa)</b>, Kenya.<br>Want an analysis run for you, or training for your team? <a href="https://github.com/MugambiD/bohemian-wind/issues">Open an issue</a> to get in touch.</p>
