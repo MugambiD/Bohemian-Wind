@@ -115,10 +115,17 @@ def _momm(months: dict, h: float, min_share: float = _climate.MIN_MONTH_SHARE) -
     return (float(np.mean(by)) if len(by) == 12 else None), len(by)
 
 
+ROSE_HOURS = 24 * 365          # hours of wind a rose needs: a year, so that every season is in it
+ROSE_COVERAGE = 0.90           # share of the hours between the first and the last that must be there
+
+
 def read_directions(path) -> pd.DataFrame:
-    """Hourly (or finer) reference wind: columns ws (m/s) and wd (degrees the wind comes from). Reads a CSV, or a
-    zip holding one, with a time column and either u/v components or a speed and a direction."""
-    from ..longterm import PAIR_NAMES, TIME_NAMES, checked_speed, checked_speed_or_component, one_location  # noqa: PLC0415
+    """Reference wind for the rose, hour by hour: columns ws (m/s) and wd (degrees the wind comes from), indexed by
+    the hour. Reads a CSV, or a zip holding one CSV, with a time column and either u/v components or a speed and a
+    direction, hourly or finer. Finer values are averaged into their hour, so every hour counts once however often
+    it was sampled. At least a year of hours is needed, without long gaps."""
+    from ..longterm import (PAIR_NAMES, TIME_NAMES, checked_speed, checked_speed_or_component, one_location,  # noqa: PLC0415
+                            one_record_per_time, parsed_times)
     path = Path(path)
     if not path.is_file():
         raise SummaryError(f"The direction file was not found: {path.name}.")
@@ -127,12 +134,15 @@ def read_directions(path) -> pd.DataFrame:
             import io  # noqa: PLC0415
             import zipfile  # noqa: PLC0415
             with zipfile.ZipFile(path) as z:
-                names = [n for n in z.namelist() if n.lower().endswith(".csv")]
-                if not names:
-                    raise SummaryError(f"{path.name} holds no CSV file.")
+                names = sorted(n for n in z.namelist() if n.lower().endswith(".csv"))
+                if len(names) != 1:                          # with two, which one is the wind would hang on their order
+                    raise SummaryError(f"The direction file {path.name} holds {len(names)} CSV files; it should hold one. "
+                                       "Take the one for the point nearest the mast out of the archive and name that file.")
                 df = pd.read_csv(io.BytesIO(z.read(names[0])))
         else:
             df = pd.read_csv(path)
+    except SummaryError:
+        raise
     except (OSError, ValueError, pd.errors.ParserError) as e:
         raise SummaryError(f"The direction file {path.name} could not be read: {e}") from e
     low = {str(c).strip().lower(): c for c in df.columns}
@@ -145,23 +155,34 @@ def read_directions(path) -> pd.DataFrame:
     if pair is None and (d is None or sp is None):
         raise SummaryError(f"The direction file {path.name} needs the wind as u and v components, or as a speed and a direction.")
     try:
+        when = pd.DatetimeIndex(parsed_times(df[tcol], path.name))
         one_location(df, low, path.name)                     # one point, or which wind is read would hang on the row order
-        again = int(df[tcol].duplicated().sum())
-        if again:
-            raise ValueError(f"{path.name}: {again:,} time steps appear more than once. The table seems to hold more than one "
-                             "location or series: keep one")
         if pair is not None:
             u = checked_speed_or_component(df[pair[0]], path.name, f"component {pair[0]}")
             v = checked_speed_or_component(df[pair[1]], path.name, f"component {pair[1]}")
-            out = pd.DataFrame({"ws": checked_speed(np.hypot(u, v), path.name, "wind speed"), "wd": np.degrees(np.arctan2(-u, -v)) % 360.0})
+            checked_speed(np.hypot(u, v), path.name, "wind speed")
+            rec = one_record_per_time(pd.DataFrame({"u": u, "v": v}, index=when), path.name)
         else:
-            out = pd.DataFrame({"ws": checked_speed(pd.to_numeric(df[sp], errors="coerce"), path.name, f"wind speed column {sp}"),
-                                "wd": pd.to_numeric(df[d], errors="coerce") % 360.0})
+            ws = checked_speed(pd.to_numeric(df[sp], errors="coerce"), path.name, f"wind speed column {sp}")
+            wd = np.asarray(pd.to_numeric(df[d], errors="coerce"), dtype=float) % 360.0
+            rec = one_record_per_time(pd.DataFrame({"ws": ws, "wd": wd}, index=when), path.name)
+            rad = np.radians(rec["wd"].to_numpy())
+            rec = pd.DataFrame({"u": -rec["ws"].to_numpy() * np.sin(rad), "v": -rec["ws"].to_numpy() * np.cos(rad)}, index=rec.index)
     except ValueError as e:
         raise SummaryError(f"The direction file cannot be used: {e}.") from e
-    out = out.dropna()
-    if len(out) < 24 * 365:
-        raise SummaryError(f"The direction file {path.name} holds {len(out):,} records: at least a year of hourly wind is needed for a rose.")
+    # every hour once: the speed is the mean of the hour's speeds, the direction that of the hour's mean wind vector
+    rec["ws"] = np.hypot(rec["u"].to_numpy(), rec["v"].to_numpy())
+    hour = rec.groupby(rec.index.floor("h")).mean()
+    out = pd.DataFrame({"ws": hour["ws"], "wd": np.degrees(np.arctan2(-hour["u"], -hour["v"])) % 360.0}).dropna()
+    if len(out) < ROSE_HOURS:
+        span = f", from {out.index[0]:%d %b %Y %H:%M} to {out.index[-1]:%d %b %Y %H:%M}" if len(out) else ""
+        raise SummaryError(f"The direction file {path.name} holds wind for {len(out):,} different hours{span} "
+                           f"({len(rec):,} records): at least a year of hours ({ROSE_HOURS:,}) is needed for a rose.")
+    between = int((out.index[-1] - out.index[0]) / pd.Timedelta(hours=1)) + 1
+    if len(out) < ROSE_COVERAGE * between:
+        raise SummaryError(f"The direction file {path.name} has gaps: wind for {len(out):,} of the {between:,} hours between "
+                           f"{out.index[0]:%d %b %Y} and {out.index[-1]:%d %b %Y} ({100 * len(out) / between:.0f} %). "
+                           f"A rose needs hourly wind for at least {100 * ROSE_COVERAGE:.0f} % of its period.")
     return out
 
 
@@ -222,7 +243,7 @@ def build_climate(spec: dict, n_sectors: int = 12) -> dict:
             sectors.append({"centre": i * width, "freq": float(freq[i]), "A": float(m / _gamma(1 + 1 / k_sec)), "k": float(k_sec),
                             "mean": float(m), "records": 0, "reference_records": int((sec == i).sum())})
         no_direction = False
-        dir_note = str(dspec.get("what") or "reference series") + f" ({len(ref):,} records)"
+        dir_note = str(dspec.get("what") or "reference series") + f" ({len(ref):,} hours, {ref.index[0]:%b %Y} to {ref.index[-1]:%b %Y})"
     else:
         for i in range(n_sectors):
             sectors.append({"centre": i * width, "freq": 1.0 / n_sectors, "A": A_all, "k": k_all, "mean": mean_top, "records": 0})

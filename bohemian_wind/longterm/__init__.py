@@ -178,6 +178,7 @@ TIME_NAMES = ("valid_time", "time", "datetime", "date", "timestamp")
 SPEED_NAMES = ("wind_speed_100m", "ws100", "ws100m", "wind_speed", "windspeed", "ws", "speed", "ws50m", "si100", "si10")
 PAIR_NAMES = (("u100", "v100"), ("100m_u_component_of_wind", "100m_v_component_of_wind"), ("u10", "v10"),
               ("10m_u_component_of_wind", "10m_v_component_of_wind"), ("u", "v"))
+MAX_UNREAD_TIMES = 0.01        # share of a reference file's times that may fail to read (a stray line); more, and the file is refused
 SECOND_MONTH_SHARE = 0.95      # a month of the second reference counts when this share of its time steps is there
 
 
@@ -226,19 +227,41 @@ def checked_speed_or_component(col, name: str, what: str) -> np.ndarray:
     return v
 
 
+def parsed_times(col, name: str) -> pd.Series:
+    """The time column as dates and times (UTC). A column that does not read as times is refused: a table is not
+    taken for a year of wind because it has a year's worth of rows."""
+    import warnings  # noqa: PLC0415
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)                     # pandas says so when it has to guess the format
+        when = pd.to_datetime(col, errors="coerce", utc=True).dt.tz_localize(None)
+    bad = int(when.isna().sum())
+    if bad and bad > MAX_UNREAD_TIMES * len(when):
+        raise ValueError(f"{name}: {bad:,} of its {len(when):,} times could not be read as dates and times. Check the time column")
+    return when
+
+
+def one_record_per_time(values: pd.DataFrame, name: str) -> pd.DataFrame:
+    """One record per time step, by the same rule for every reference file. values is indexed by time and holds
+    everything that was read of the wind (the speed, or the speed and the direction, or both components). A row
+    that repeats another in its time and in every value is the same record twice and is dropped. The same time
+    with different values is two series in one table, and is refused: which one is read must not hang on the
+    order of the rows."""
+    v = values[values.index.notna()].dropna().sort_index(kind="stable")
+    if not v.index.has_duplicates:
+        return v
+    key = v.round(6)
+    key.insert(0, "_time", v.index)
+    v = v[~key.duplicated().to_numpy()]
+    clash = int(v.index[v.index.duplicated()].nunique())
+    if clash:
+        raise ValueError(f"{name}: {clash:,} time steps appear more than once with different wind. The table seems to hold "
+                         "more than one location or series: keep one")
+    return v
+
+
 def one_series(s: pd.Series, name: str) -> pd.Series:
-    """One value per time step. The same time twice with the same value is a repeated row and is dropped; with
-    different values the table holds more than one series, and which one is read must not hang on the row order."""
-    s = s[s.index.notna()].sort_index(kind="stable")
-    dup = s.index.duplicated(keep=False)
-    if dup.any():
-        spread = s[dup].groupby(level=0).agg(lambda x: float(x.max() - x.min()))
-        clash = int((spread > 1e-6).sum())
-        if clash:
-            raise ValueError(f"{name}: {clash:,} time steps appear more than once with different wind speeds. The table seems to hold "
-                             "more than one location or series: keep one")
-        s = s[~s.index.duplicated()]
-    return s
+    """One value per time step (see one_record_per_time)."""
+    return one_record_per_time(s.to_frame("ws"), name)["ws"]
 
 
 def read_reference_file(path) -> tuple:
@@ -270,22 +293,26 @@ def read_reference_file(path) -> tuple:
     tcol = next((cols[n] for n in TIME_NAMES if n in cols), None)
     if tcol is None:
         raise ValueError(f"{p.name} has no time column (looked for: {', '.join(TIME_NAMES)})")
-    when = pd.to_datetime(df[tcol], errors="coerce", utc=True).dt.tz_localize(None)
+    when = pd.DatetimeIndex(parsed_times(df[tcol], p.name))
     point = one_location(df, cols, p.name)
     pair = next(((cols[a], cols[b]) for a, b in PAIR_NAMES if a in cols and b in cols), None)
     scol = next((cols[n] for n in SPEED_NAMES if n in cols), None)
     if pair is not None:
-        u = checked_speed(np.abs(checked_speed_or_component(df[pair[0]], p.name, f"component {pair[0]}")), p.name, f"component {pair[0]}")
-        v = checked_speed(np.abs(checked_speed_or_component(df[pair[1]], p.name, f"component {pair[1]}")), p.name, f"component {pair[1]}")
-        speed = checked_speed(np.hypot(u, v), p.name, "wind speed")
+        u = checked_speed_or_component(df[pair[0]], p.name, f"component {pair[0]}")
+        v = checked_speed_or_component(df[pair[1]], p.name, f"component {pair[1]}")
+        checked_speed(np.abs(u), p.name, f"component {pair[0]}")
+        checked_speed(np.abs(v), p.name, f"component {pair[1]}")
+        checked_speed(np.hypot(u, v), p.name, "wind speed")
+        rec = one_record_per_time(pd.DataFrame({"u": u, "v": v}, index=when), p.name)      # the same wind twice: one record
+        s = pd.Series(np.hypot(rec["u"].to_numpy(), rec["v"].to_numpy()), index=rec.index)
         what = f"wind speed from the components {pair[0]} and {pair[1]}"
     elif scol is not None:
         speed = checked_speed(pd.to_numeric(df[scol], errors="coerce"), p.name, f"wind speed column {scol}")
+        s = one_record_per_time(pd.DataFrame({"ws": speed}, index=when), p.name)["ws"]
         what = f"wind speed column {scol}"
     else:
         raise ValueError(f"{p.name} has neither a wind speed column nor the two wind components "
                          f"(looked for: {', '.join(SPEED_NAMES[:5])} ...; u100 and v100 ...)")
-    s = one_series(pd.Series(np.asarray(speed, dtype=float), index=pd.DatetimeIndex(when)).dropna(), p.name)
     if len(s) < 12:
         raise ValueError(f"{p.name} holds {len(s)} usable values: too few for a reference")
     step = float(np.median((s.index[1:] - s.index[:-1]).total_seconds())) / 3600.0      # hours between values

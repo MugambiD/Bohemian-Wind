@@ -166,7 +166,7 @@ def test_a_reference_file_is_one_point_and_its_wind_speeds_can_be_wind_speeds(tm
         with pytest.raises(ValueError, match="holds 2 locations"):
             longterm.read_reference_file(_rows(tmp_path, n, frame))
     both = pd.concat([a, b]).drop(columns=["latitude", "longitude"])                             # no position columns: caught by the times
-    with pytest.raises(ValueError, match="more than once with different wind speeds"):
+    with pytest.raises(ValueError, match="more than once with different wind"):
         longterm.read_reference_file(_rows(tmp_path, "nopos.csv", both))
     monthly, what = longterm.read_reference_file(_rows(tmp_path, "twice.csv", pd.concat([a, a])))   # the same rows twice are one series
     assert monthly.mean() == pytest.approx(4.0) and "at -1, 30" in what

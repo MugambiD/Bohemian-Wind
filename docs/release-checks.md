@@ -56,3 +56,18 @@ The review's product findings (a reference file with two locations read by row o
 speeds accepted; compass names at 45°; map icons fetched from the web) are fixed on main and listed in the changelog.
 The setup program rolled back on that host when Windows denied a registry key for the current user: checks 1 and 2
 are there to settle whether that happens on an ordinary PC.
+
+## What the retest of 0.3.2-dev found (23 November 2026)
+
+The retest ran the test suite at commit `1fe9332` (248 passed, 10 skipped for programs the host did not have) and
+read the fixes. It found three more faults in the readers of reference files. All three are fixed on main, each
+with the controls the retest asked for (`tests/test_summary_tables.py`).
+
+| Finding | Fix | Controls in the tests |
+|---|---|---|
+| A zip with two CSV files gave an east or a west wind rose by the order of its members | an archive must hold one CSV; otherwise it is refused before any member is read | both orders refused with the same words; an archive with one CSV loads |
+| A year of wind was counted in rows: 8,760 one-minute rows, or 8,760 rows with unreadable times, passed | times are read as times; values are averaged into their hour; 8,760 different hours are needed, 90 % or more of the hours from first to last | minutes, unreadable times, short, gapped: refused; hourly and ten-minute: accepted; an hour counts once however often it was sampled |
+| A repeated row was accepted by the long-term reader and refused by the rose reader | one rule in both: the same time and the same wind is one record; the same time with different wind is refused | exact repeats accepted in both; opposite winds of one speed refused in both |
+
+Still open from the retest, and the reason no build has been released since 0.3.1-dev: checks 1 to 10 above on a
+real PC, and the setup program that rolled back on 21 November, which is not yet explained.

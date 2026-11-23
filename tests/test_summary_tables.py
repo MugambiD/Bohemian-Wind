@@ -136,3 +136,75 @@ def test_the_steps_and_the_reports_run_on_summary_tables(tmp_path):
     from bohemian_wind.reports import kit  # noqa: PLC0415
     for t in (wra, summ):                                                                       # [COMPLIANCE] on every report
         assert t.count(kit.NOTICE) >= 2
+
+
+def _rose(path, times, ws=6.0, wd=90.0):
+    pd.DataFrame({"time": times, "ws": ws, "wd": wd}).to_csv(path, index=False)
+    return path
+
+
+def test_the_rose_file_is_one_table_and_a_year_of_hours_by_the_clock(tmp_path):
+    """Outside retest of 0.3.2-dev (23 Nov 2026). An archive with two tables gave an east or a west rose by the order
+    of its members; 8,760 one-minute rows, and 8,760 rows whose times were not times, passed for a year."""
+    import zipfile  # noqa: PLC0415
+    year = pd.date_range("2025-01-01", periods=8760, freq="h")
+    east, west = _rose(tmp_path / "point0.csv", year, 4.0, 90.0), _rose(tmp_path / "point1.csv", year, 12.0, 270.0)
+    said = []
+    for name, order in (("east-first.zip", (east, west)), ("west-first.zip", (west, east))):
+        with zipfile.ZipFile(tmp_path / name, "w") as z:
+            for f in order:
+                z.write(f, f.name)
+        with pytest.raises(summary.SummaryError, match="holds 2 CSV files") as e:
+            summary.read_directions(tmp_path / name)
+        said.append(str(e.value).replace(name, ""))
+    assert said[0] == said[1]                                            # either order: the same refusal
+    with zipfile.ZipFile(tmp_path / "one.zip", "w") as z:
+        z.write(east, east.name)
+    one = summary.read_directions(tmp_path / "one.zip")                 # an archive with one table still loads
+    assert len(one) == 8760 and one["ws"].mean() == pytest.approx(4.0) and one["wd"].iloc[0] == pytest.approx(90.0)
+
+    with pytest.raises(summary.SummaryError, match="146 different hours"):                            # six days of minutes
+        summary.read_directions(_rose(tmp_path / "minutes.csv", pd.date_range("2025-01-01", periods=8760, freq="min")))
+    with pytest.raises(summary.SummaryError, match="could not be read as dates and times"):
+        summary.read_directions(_rose(tmp_path / "bad.csv", [f"bad-{i}" for i in range(8760)]))
+    with pytest.raises(summary.SummaryError, match="8,000 different hours"):                          # short of a year
+        summary.read_directions(_rose(tmp_path / "short.csv", year[:8000]))
+    three = pd.date_range("2023-01-01", "2025-12-31 23:00", freq="h")
+    with pytest.raises(summary.SummaryError, match="has gaps"):                                        # a year of hours spread over three
+        summary.read_directions(_rose(tmp_path / "gapped.csv", three[::3]))
+    assert len(summary.read_directions(_rose(tmp_path / "hourly.csv", year))) == 8760
+    ten = pd.date_range("2025-01-01", periods=8760 * 6, freq="10min")                                  # ten-minute values: six to the hour
+    sub = summary.read_directions(_rose(tmp_path / "ten.csv", ten, np.tile([2.0, 4.0, 6.0, 8.0, 10.0, 12.0], 8760), 90.0))
+    assert len(sub) == 8760 and sub["ws"].to_numpy() == pytest.approx(7.0) and sub["wd"].to_numpy() == pytest.approx(90.0)
+    # every hour counts once, however often it was sampled: a second year at ten minutes does not outweigh an hourly first
+    mixed = pd.concat([pd.DataFrame({"time": year, "ws": 6.0, "wd": 90.0}),
+                       pd.DataFrame({"time": pd.date_range("2026-01-01", periods=8760 * 6, freq="10min"), "ws": 6.0, "wd": 270.0})])
+    mixed.to_csv(tmp_path / "mixed.csv", index=False)
+    m = summary.read_directions(tmp_path / "mixed.csv")
+    assert (m["wd"].round() == 90).mean() == pytest.approx(0.5)
+
+
+def test_a_repeated_row_is_one_record_and_two_winds_at_one_time_are_refused_in_both_readers(tmp_path):
+    """Outside retest of 0.3.2-dev: the same row twice was taken by the long-term reader and refused by the rose
+    reader. Both now follow one rule, on the time and on everything read of the wind."""
+    from bohemian_wind import longterm  # noqa: PLC0415
+    t = pd.date_range("2020-01-01", "2022-12-31 23:00", freq="h")
+    uv = pd.DataFrame({"valid_time": t, "u100": -3.0, "v100": 4.0})
+    sd = pd.DataFrame({"time": t, "ws": 5.0, "wd": 90.0})
+    for frame, name in ((uv, "uv"), (sd, "sd")):
+        twice = tmp_path / f"{name}-twice.csv"
+        pd.concat([frame, frame]).to_csv(twice, index=False)                                   # exact repeats: one record each
+        assert len(summary.read_directions(twice)) == len(t)
+        if name == "uv":
+            assert longterm.read_reference_file(twice)[0].mean() == pytest.approx(5.0)
+    turned = uv.assign(u100=3.0, v100=-4.0)                                                    # the same speed from the opposite side
+    clash = tmp_path / "uv-clash.csv"
+    pd.concat([uv, turned]).to_csv(clash, index=False)
+    with pytest.raises(ValueError, match="more than once with different wind"):
+        longterm.read_reference_file(clash)
+    with pytest.raises(summary.SummaryError, match="more than once with different wind"):
+        summary.read_directions(clash)
+    clash2 = tmp_path / "sd-clash.csv"
+    pd.concat([sd, sd.assign(wd=270.0)]).to_csv(clash2, index=False)                           # the same speed, another direction
+    with pytest.raises(summary.SummaryError, match="more than once with different wind"):
+        summary.read_directions(clash2)
