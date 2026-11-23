@@ -6,7 +6,7 @@ What changed in each version of Bohemian Wind. The format follows [Keep a Change
 
 ## [Unreleased]
 
-## [0.3.2-dev] - 2026-11-22
+## [0.3.2-dev] - 2026-11-23
 
 ### Added
 - Step 1 from monthly summary tables, for a mast known only from reports. A small file, `wind_summary.json`, holds the mean wind speed per height and month and the valid share of each month; step 1 reads it in place of logger files and the later steps run as usual. The shape of the wind speed distribution is one Weibull shape factor you enter. When the mast has no vane, or the reports give no directions, the wind rose can be taken from an hourly reanalysis file (the same kind of file as the second long-term reference).
