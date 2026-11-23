@@ -17,8 +17,9 @@ Open-source software for the wind developer's workflow, built for projects in Ea
 </p>
 
 <p align="center">
-  <a href="https://github.com/MugambiD/bohemian-wind/releases"><img alt="Download for Windows" src="https://img.shields.io/badge/Download_for_Windows-setup_program-008781?style=for-the-badge&logo=windows&logoColor=white" height="44"></a>
+  <a href="https://github.com/MugambiD/bohemian-wind/releases/tag/v0.3.1-dev"><img alt="Download Windows pilot (0.3.1-dev)" src="https://img.shields.io/badge/Download_Windows_pilot-0.3.1--dev-008781?style=for-the-badge&logo=windows&logoColor=white" height="44"></a>
 </p>
+<p align="center">The 0.3.1-dev installer is for pilot testing. The reference-data import, wind-rose label and offline map icon fixes are on main and will ship in the next build.</p>
 <p align="center">Free. No account. Runs on your own computer; your measurements never leave it.<br>
 <a href="docs/media/bohemian-wind-demo.mp4">Watch the 2-minute demo</a> |
 <a href="#try-it-without-any-data">Try it without any data</a> |
@@ -123,6 +124,7 @@ Honest status of this version (0.3.2-dev). "Working" means it runs end to end an
 | [How each step works](docs/workflow.md) | Methods, defaults, uncertainty rules and the limits of every step |
 | [Daily intake](docs/daily-intake.md) | The folder watch and the scheduled morning check |
 | [Windows setup program](docs/windows-installer.md) | What is inside, how it is built and how it is tested |
+| [Windows release checks](docs/release-checks.md) | What a build must pass on a real PC before it stops being a pilot, and what the last outside review found |
 | [Design rules and roadmap](docs/design.md) | How the interface is meant to work, and what comes next |
 | [Changelog](CHANGELOG.md) | What changed in each version |
 | [Third-party notices](THIRD_PARTY_NOTICES.md) | Components and data sources, with their licences |

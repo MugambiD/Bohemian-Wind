@@ -188,16 +188,26 @@ def test_a_reference_file_is_one_point_and_its_wind_speeds_can_be_wind_speeds(tm
         summary.read_directions(_rows(tmp_path, "rose3.csv", two.drop(columns=["latitude", "longitude"])))
 
 
-def test_the_outside_reviews_five_files_read_as_its_acceptance_asks():
-    """The five synthetic files of the review of 0.3.1-dev (23 Nov 2026): the control reads, the others are refused,
-    and the two row orders of the two-location file end the same way."""
-    here = Path(__file__).parent / "fixtures" / "reference_review"
-    monthly, _ = longterm.read_reference_file(here / "control.csv")
+def test_the_outside_reviews_five_files_read_as_its_acceptance_asks(tmp_path):
+    """The five synthetic files of the review of 0.3.1-dev (23 Nov 2026), written here as the review gave them (data
+    files are not kept in the repository): the control reads, the others are refused, and the two row orders of the
+    two-location file end the same way."""
+    months = [f"{y}-{m:02d}-01" for y in (2020, 2021) for m in range(1, 13)]
+
+    def write(name, rows):
+        f = tmp_path / f"{name}.csv"
+        f.write_text("date,wind_speed,longitude\n" + "".join(f"{d},{v},{lon}\n" for d, v, lon in rows), encoding="utf-8")
+        return f
+
+    monthly, _ = longterm.read_reference_file(write("control", [(d, 6, 36) for d in months]))
     assert monthly.mean() == pytest.approx(6.0) and len(monthly) == 24
+    files = {"negative": ([(d, -6, 36) for d in months], "negative"), "infinite": ([(d, "inf", 36) for d in months], "infinite"),
+             "A-first": ([r for d in months for r in ((d, 4, 36), (d, 12, 37))], "holds 2 locations"),
+             "B-first": ([r for d in months for r in ((d, 12, 37), (d, 4, 36))], "holds 2 locations")}
     said = {}
-    for name, why in (("negative", "negative"), ("infinite", "infinite"), ("A-first", "holds 2 locations"), ("B-first", "holds 2 locations")):
+    for name, (rows, why) in files.items():
         with pytest.raises(ValueError, match=why) as e:
-            longterm.read_reference_file(here / f"{name}.csv")
+            longterm.read_reference_file(write(name, rows))
         said[name] = str(e.value).replace(f"{name}.csv", "")
     assert said["A-first"].replace("lon 36; lon 37", "") == said["B-first"].replace("lon 37; lon 36", "")
 

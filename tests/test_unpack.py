@@ -256,8 +256,8 @@ def test_a_deep_folder_inside_an_archive_is_unpacked_in_the_computers_short_temp
     assert list(systemp.iterdir()) == []                                                        # and nothing left behind
     assert not [d for d in dest.rglob("*") if d.is_dir() and d.name.startswith((".u", "bw-"))]
     left = dest / ".uabc123" / deep                                                  # what a failed earlier version left
-    left.mkdir(parents=True)
-    (left / names[0]).write_bytes(files[names[0]])
+    Path(unpack._long(left)).mkdir(parents=True)           # the long form: under a deep test folder the plain path passes
+    Path(unpack._long(left / names[0])).write_bytes(files[names[0]])                 # what Windows allows (outside review, Nov 2026)
     (data / "month.rar").write_bytes((data / "month.rar").read_bytes())             # the archive is touched: opened again
     unpack.unpack(unpack.find(data), data, dest, log=quiet)
     assert not (dest / ".uabc123").exists()
