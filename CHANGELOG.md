@@ -6,6 +6,18 @@ What changed in each version of Bohemian Wind. The format follows [Keep a Change
 
 ## [Unreleased]
 
+## [0.3.5-dev] - 2026-11-25
+
+### Added
+- Alternative layouts, kept and compared (`bohemian-wind layout ...`). Keep the project's layout under a name, copy its positions, move turbines by metres (or edit the copy in a GIS program: it is a GeoJSON file of points), have step 4 take the copy as given, run steps 4 and 5, keep the result and compare the two. The comparison gives turbines, capacity, gross energy, wake loss, other losses, net P50, P90, cost of energy and homes affected by noise and flicker, each as an amount and a percentage; which turbines moved and how far; and every turbine's free wind, wake loss and net energy in both. It is written as a one-page text and a table in the project's `layouts/` folder.
+- The comparison warns when the two layouts did not rest on the same wind, turbine, wake model, losses or wind map method, and when only one was kept with its screening.
+- An energy and wake benchmark in the validation set: one turbine, two in line with the wind, two across it, and three rows of three, on flat ground with the generic 4.5 MW turbine. Twelve more cases with answers known from the power curve, from geometry and from symmetry (23 in all), and `docs/validation/wake-benchmark-<version>.json` with the gross energy, energy after wakes and wake loss of every turbine for each of the three wake models, for anyone to set another calculation against.
+- The connector for AI assistants gains `list_layouts`, `save_layout` and `compare_layouts`.
+
+### Not in this version
+- No map editor: turbines are moved by command or in a GIS program. The comparison is not yet on the screens of the application.
+
+
 ## [0.3.4-dev] - 2026-11-25
 
 ### Fixed
@@ -170,7 +182,8 @@ This is a corrective release for 0.3.3-dev. If you have a summary-tables project
 
 Before 0.2.0-dev, Bohemian Wind was a stand-alone data-check window (`qc_main.py`, still included). Its history is not in this repository.
 
-[Unreleased]: https://github.com/MugambiD/bohemian-wind/compare/v0.3.4-dev...HEAD
+[Unreleased]: https://github.com/MugambiD/bohemian-wind/compare/v0.3.5-dev...HEAD
+[0.3.5-dev]: https://github.com/MugambiD/bohemian-wind/compare/v0.3.4-dev...v0.3.5-dev
 [0.3.4-dev]: https://github.com/MugambiD/bohemian-wind/compare/v0.3.3-dev...v0.3.4-dev
 [0.3.3-dev]: https://github.com/MugambiD/bohemian-wind/compare/v0.3.2-dev...v0.3.3-dev
 [0.3.2-dev]: https://github.com/MugambiD/bohemian-wind/compare/v0.3.1-dev...v0.3.2-dev

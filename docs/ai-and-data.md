@@ -26,8 +26,8 @@ before running a step.
 
 ## The connector for assistants
 
-`bohemian-wind mcp` serves five tools over the Model Context Protocol: `project_status`, `run_steps`,
-`get_results`, `get_provenance` and `create_demo`. The assistant starts the program on your computer and talks to
+`bohemian-wind mcp` serves eight tools over the Model Context Protocol: `project_status`, `run_steps`,
+`get_results`, `get_provenance`, `list_layouts`, `save_layout`, `compare_layouts` and `create_demo`. The assistant starts the program on your computer and talks to
 it through standard input and output. Nothing listens on the network.
 
 ```json

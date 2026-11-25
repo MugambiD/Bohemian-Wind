@@ -162,7 +162,7 @@ def test_the_provenance_record_and_the_assistant_connector_tell_the_same_story(p
             {"jsonrpc": "2.0", "id": 7, "method": "no/such"}, "not a message")
     assert [m.get("id") for m in a] == [1, 2, 3, 4, 5, 6, 7, None]                      # the notification gets no answer
     assert a[0]["result"]["protocolVersion"] == "2025-06-18" and "bankable" in a[0]["result"]["instructions"]
-    assert {t["name"] for t in a[1]["result"]["tools"]} == {"project_status", "run_steps", "get_results", "get_provenance", "create_demo"}
+    assert {t["name"] for t in a[1]["result"]["tools"]} == {"project_status", "run_steps", "get_results", "get_provenance", "create_demo", "list_layouts", "save_layout", "compare_layouts"}
     status = json.loads(a[2]["result"]["content"][0]["text"])
     assert [s["step"] for s in status["steps"]] == list(STEPS) and "bankable" in status["notice"]
     layout = json.loads(a[3]["result"]["content"][0]["text"])
@@ -170,3 +170,68 @@ def test_the_provenance_record_and_the_assistant_connector_tell_the_same_story(p
     assert a[4]["result"]["isError"] and "Unknown step" in a[4]["result"]["content"][0]["text"]
     assert json.loads(a[5]["result"]["content"][0]["text"])["format"] == provenance.FORMAT
     assert a[6]["error"]["code"] == -32601 and a[7]["error"]["code"] == -32600
+
+
+def test_two_layouts_are_kept_changed_and_compared(project):
+    """0.3.5-dev: keep layout A, copy it, move three turbines, run, keep as B, compare."""
+    from bohemian_wind import layouts  # noqa: PLC0415
+    p = Project.open(project.folder)
+    layouts.design_again(p)
+    for step in ("layout", "environment"):
+        p.run(step, log=lambda m: None)
+    a = layouts.save(p, "Layout A")
+    assert a["screening"] and a["figures"]["n_placed"] == len(a["positions"]) and not a["basis"]["given"]
+    with pytest.raises(layouts.LayoutError, match="No layout is kept"):
+        layouts.compare(p, "Layout A", "Layout B")
+    rel = layouts.duplicate(p, "Layout A", "Layout B")
+    assert rel == "layouts/Layout-B.geojson"
+    with pytest.raises(layouts.LayoutError, match="exist already"):
+        layouts.duplicate(p, "Layout A", "Layout B")
+    ids = [q["id"] for q in a["positions"]]
+    for tid, east, north in ((ids[1], 0.0, 400.0), (ids[4], 300.0, -200.0), (ids[6], -250.0, 0.0)):
+        layouts.move(p, "Layout B", tid, east, north)
+    with pytest.raises(layouts.LayoutError, match="has no turbine"):
+        layouts.move(p, "Layout B", "T99", 10.0)
+    layouts.use(p, "Layout B")
+    assert p.status("layout") != "done"                                       # the positions changed: step 4 is to run again
+    p.run("layout", log=lambda m: None)
+    only_layout = layouts.save(p, "Layout B")
+    assert only_layout["screening"] is None and only_layout["basis"]["given"]  # step 5 not run for it yet
+    assert any("Only 'Layout A' was kept with its noise and flicker screening" in w for w in layouts.compare(p, "Layout A", "Layout B")["warnings"])
+    p.run("environment", log=lambda m: None)
+    layouts.save(p, "Layout B")
+    c = layouts.write_comparison(p, "Layout A", "Layout B")
+    assert not c["warnings"], c["warnings"]                                    # the same wind, turbine, wake model and losses
+    moved = {t["id"]: t for t in c["turbines"] if t.get("moved")}
+    assert set(moved) == {ids[1], ids[4], ids[6]}
+    assert moved[ids[1]]["north_m"] == pytest.approx(400, abs=6) and moved[ids[6]]["east_m"] == pytest.approx(-250, abs=6)
+    net = c["rows"]["Net energy P50, GWh a year"]
+    b = layouts.kept(p, "Layout B")
+    assert net["a"] == a["figures"]["p50_gwh"] and net["b"] == b["figures"]["p50_gwh"]
+    assert net["change"] == pytest.approx(net["b"] - net["a"]) and net["change_pct"] == pytest.approx(100 * (net["b"] / net["a"] - 1))
+    assert sum(t["p50_mwh"]["change"] for t in c["turbines"]) / 1000.0 == pytest.approx(net["change"], abs=1e-6)   # the turbines add up
+    assert "Homes over the noise level" in c["rows"] and c["rows"]["Turbines"]["change"] == 0
+    text = (p.folder / c["files"][0]).read_text(encoding="utf-8")
+    assert "[COMPLIANCE]" in text and "bankable" in text and ids[4] in text and "Change, %" in text
+    assert (p.folder / c["files"][1]).is_file() and [x["name"] for x in layouts.listing(p)] == ["Layout A", "Layout B"]
+    # another wake model for one of them: the comparison says the two no longer stand on the same footing
+    p.update("layout", {"wake": "jensen075"})
+    p.run("layout", log=lambda m: None)
+    layouts.save(p, "Layout B jensen")
+    assert any("wake model" in w for w in layouts.compare(p, "Layout A", "Layout B jensen")["warnings"])
+    p.update("layout", {"wake": "niayifar"})
+    layouts.design_again(p)
+
+
+def test_the_wake_benchmark_is_published_with_every_turbine_and_model():
+    from pathlib import Path  # noqa: PLC0415
+    import bohemian_wind  # noqa: PLC0415
+    b = validation.benchmark()
+    assert len(b["cases"]) == 4 * 2 * 3 and {c["wake_model"] for c in b["cases"]} == {"niayifar", "jensen075", "turbopark"}
+    line = next(c for c in b["cases"] if c["layout"].startswith("two in line") and c["wind"].startswith("wind from the west") and c["wake_model"] == "jensen075")
+    assert line["wake_loss_pct"][0] == 0.0 and 5.0 < line["wake_loss_pct"][1] < 30.0
+    kept = Path(__file__).resolve().parents[1] / "docs" / "validation" / f"wake-benchmark-{bohemian_wind.__version__}.json"
+    assert kept.is_file(), "run: bohemian-wind validate --write docs/validation"
+    on_file = json.loads(kept.read_text(encoding="utf-8"))["cases"]
+    for mine, theirs in zip(b["cases"], on_file):
+        assert mine["layout"] == theirs["layout"] and mine["wake_loss_pct"] == pytest.approx(theirs["wake_loss_pct"], abs=0.01)

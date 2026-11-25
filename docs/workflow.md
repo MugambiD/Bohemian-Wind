@@ -104,6 +104,8 @@ This is a first view, and every output says so. No record is checked, so sensor 
 
 **Stops at.** Not a global optimiser. The buildings are not a survey of homes. Generic curves, not a manufacturer's. Default losses and uncertainties are assumptions to edit. No curtailment study, no electrical design. The result also shows what the energy would be if no turbine were windier than the mast: that difference rests on the wind map alone, and when it is more than a tenth of the P50 the result says so, with the P50 it would leave. Turbines sit on cell centres: on ridges narrower than the cells a coarse grid misses the crest and loses energy.
 
+**Alternative layouts.** `bohemian-wind layout save FOLDER NAME` keeps the present layout in the project's `layouts/` folder: its positions as a GeoJSON file of points and its results from steps 4 and 5. `layout duplicate` copies the positions under a new name; `layout move FOLDER NAME T07 --east 300 --north -150` moves a turbine of the copy (or edit the file in a GIS program); `layout use` has step 4 take those positions as given; after steps 4 and 5, `layout save` keeps the result and `layout compare FOLDER A B` sets the two side by side as a one-page text and a table. `layout design` hands the placing back to step 4. A comparison warns when the two did not rest on the same wind, turbine, wake model or losses.
+
 ## 5. Noise and shadow flicker
 
 **Noise.** ISO 9613-2 general method, A-weighted at 500 Hz, alternative ground attenuation, air absorption 1.9 dB/km, receiver 4 m above ground. Terrain sets heights and the mean path height; screening by hills and buildings is ignored.

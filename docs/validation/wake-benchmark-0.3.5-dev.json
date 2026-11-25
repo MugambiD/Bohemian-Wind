@@ -1,0 +1,818 @@
+{
+ "version": "0.3.5-dev",
+ "turbine": "generic 4.5 MW, 163 m rotor, 120 m hub (bohemian_wind.energy.turbine.generic_model)",
+ "air_density": 1.225,
+ "turbulence_intensity": 0.1,
+ "weibull": {
+  "A": 8.5,
+  "k": 2.2
+ },
+ "sectors": 12,
+ "hours_per_year": 8766.0,
+ "cases": [
+  {
+   "layout": "one turbine",
+   "x_m": [
+    0.0
+   ],
+   "y_m": [
+    0.0
+   ],
+   "wind": "wind from the western sector only",
+   "wake_model": "niayifar",
+   "gross_mwh": [
+    20490.5
+   ],
+   "after_wakes_mwh": [
+    20490.5
+   ],
+   "wake_loss_pct": [
+    0.0
+   ],
+   "farm_wake_loss_pct": 0.0
+  },
+  {
+   "layout": "one turbine",
+   "x_m": [
+    0.0
+   ],
+   "y_m": [
+    0.0
+   ],
+   "wind": "wind from the western sector only",
+   "wake_model": "jensen075",
+   "gross_mwh": [
+    20490.5
+   ],
+   "after_wakes_mwh": [
+    20490.5
+   ],
+   "wake_loss_pct": [
+    0.0
+   ],
+   "farm_wake_loss_pct": 0.0
+  },
+  {
+   "layout": "one turbine",
+   "x_m": [
+    0.0
+   ],
+   "y_m": [
+    0.0
+   ],
+   "wind": "wind from the western sector only",
+   "wake_model": "turbopark",
+   "gross_mwh": [
+    20490.5
+   ],
+   "after_wakes_mwh": [
+    20490.5
+   ],
+   "wake_loss_pct": [
+    0.0
+   ],
+   "farm_wake_loss_pct": 0.0
+  },
+  {
+   "layout": "one turbine",
+   "x_m": [
+    0.0
+   ],
+   "y_m": [
+    0.0
+   ],
+   "wind": "every sector alike",
+   "wake_model": "niayifar",
+   "gross_mwh": [
+    20490.5
+   ],
+   "after_wakes_mwh": [
+    20490.5
+   ],
+   "wake_loss_pct": [
+    0.0
+   ],
+   "farm_wake_loss_pct": 0.0
+  },
+  {
+   "layout": "one turbine",
+   "x_m": [
+    0.0
+   ],
+   "y_m": [
+    0.0
+   ],
+   "wind": "every sector alike",
+   "wake_model": "jensen075",
+   "gross_mwh": [
+    20490.5
+   ],
+   "after_wakes_mwh": [
+    20490.5
+   ],
+   "wake_loss_pct": [
+    0.0
+   ],
+   "farm_wake_loss_pct": 0.0
+  },
+  {
+   "layout": "one turbine",
+   "x_m": [
+    0.0
+   ],
+   "y_m": [
+    0.0
+   ],
+   "wind": "every sector alike",
+   "wake_model": "turbopark",
+   "gross_mwh": [
+    20490.5
+   ],
+   "after_wakes_mwh": [
+    20490.5
+   ],
+   "wake_loss_pct": [
+    0.0
+   ],
+   "farm_wake_loss_pct": 0.0
+  },
+  {
+   "layout": "two in line with the wind, 5 rotors apart",
+   "x_m": [
+    0.0,
+    815.0
+   ],
+   "y_m": [
+    0.0,
+    0.0
+   ],
+   "wind": "wind from the western sector only",
+   "wake_model": "niayifar",
+   "gross_mwh": [
+    20490.5,
+    20490.5
+   ],
+   "after_wakes_mwh": [
+    20490.5,
+    17835.5
+   ],
+   "wake_loss_pct": [
+    0.0,
+    12.957
+   ],
+   "farm_wake_loss_pct": 6.479
+  },
+  {
+   "layout": "two in line with the wind, 5 rotors apart",
+   "x_m": [
+    0.0,
+    815.0
+   ],
+   "y_m": [
+    0.0,
+    0.0
+   ],
+   "wind": "wind from the western sector only",
+   "wake_model": "jensen075",
+   "gross_mwh": [
+    20490.5,
+    20490.5
+   ],
+   "after_wakes_mwh": [
+    20490.5,
+    17608.5
+   ],
+   "wake_loss_pct": [
+    0.0,
+    14.065
+   ],
+   "farm_wake_loss_pct": 7.033
+  },
+  {
+   "layout": "two in line with the wind, 5 rotors apart",
+   "x_m": [
+    0.0,
+    815.0
+   ],
+   "y_m": [
+    0.0,
+    0.0
+   ],
+   "wind": "wind from the western sector only",
+   "wake_model": "turbopark",
+   "gross_mwh": [
+    20490.5,
+    20490.5
+   ],
+   "after_wakes_mwh": [
+    20490.5,
+    17120.2
+   ],
+   "wake_loss_pct": [
+    0.0,
+    16.448
+   ],
+   "farm_wake_loss_pct": 8.224
+  },
+  {
+   "layout": "two in line with the wind, 5 rotors apart",
+   "x_m": [
+    0.0,
+    815.0
+   ],
+   "y_m": [
+    0.0,
+    0.0
+   ],
+   "wind": "every sector alike",
+   "wake_model": "niayifar",
+   "gross_mwh": [
+    20490.5,
+    20490.5
+   ],
+   "after_wakes_mwh": [
+    20262.7,
+    20262.7
+   ],
+   "wake_loss_pct": [
+    1.112,
+    1.112
+   ],
+   "farm_wake_loss_pct": 1.112
+  },
+  {
+   "layout": "two in line with the wind, 5 rotors apart",
+   "x_m": [
+    0.0,
+    815.0
+   ],
+   "y_m": [
+    0.0,
+    0.0
+   ],
+   "wind": "every sector alike",
+   "wake_model": "jensen075",
+   "gross_mwh": [
+    20490.5,
+    20490.5
+   ],
+   "after_wakes_mwh": [
+    20250.3,
+    20250.3
+   ],
+   "wake_loss_pct": [
+    1.172,
+    1.172
+   ],
+   "farm_wake_loss_pct": 1.172
+  },
+  {
+   "layout": "two in line with the wind, 5 rotors apart",
+   "x_m": [
+    0.0,
+    815.0
+   ],
+   "y_m": [
+    0.0,
+    0.0
+   ],
+   "wind": "every sector alike",
+   "wake_model": "turbopark",
+   "gross_mwh": [
+    20490.5,
+    20490.5
+   ],
+   "after_wakes_mwh": [
+    20205.4,
+    20205.4
+   ],
+   "wake_loss_pct": [
+    1.391,
+    1.391
+   ],
+   "farm_wake_loss_pct": 1.391
+  },
+  {
+   "layout": "two across the wind, 5 rotors apart",
+   "x_m": [
+    0.0,
+    0.0
+   ],
+   "y_m": [
+    0.0,
+    815.0
+   ],
+   "wind": "wind from the western sector only",
+   "wake_model": "niayifar",
+   "gross_mwh": [
+    20490.5,
+    20490.5
+   ],
+   "after_wakes_mwh": [
+    20490.5,
+    20490.5
+   ],
+   "wake_loss_pct": [
+    0.0,
+    0.0
+   ],
+   "farm_wake_loss_pct": 0.0
+  },
+  {
+   "layout": "two across the wind, 5 rotors apart",
+   "x_m": [
+    0.0,
+    0.0
+   ],
+   "y_m": [
+    0.0,
+    815.0
+   ],
+   "wind": "wind from the western sector only",
+   "wake_model": "jensen075",
+   "gross_mwh": [
+    20490.5,
+    20490.5
+   ],
+   "after_wakes_mwh": [
+    20490.5,
+    20490.5
+   ],
+   "wake_loss_pct": [
+    0.0,
+    0.0
+   ],
+   "farm_wake_loss_pct": 0.0
+  },
+  {
+   "layout": "two across the wind, 5 rotors apart",
+   "x_m": [
+    0.0,
+    0.0
+   ],
+   "y_m": [
+    0.0,
+    815.0
+   ],
+   "wind": "wind from the western sector only",
+   "wake_model": "turbopark",
+   "gross_mwh": [
+    20490.5,
+    20490.5
+   ],
+   "after_wakes_mwh": [
+    20490.5,
+    20490.5
+   ],
+   "wake_loss_pct": [
+    0.0,
+    0.0
+   ],
+   "farm_wake_loss_pct": 0.0
+  },
+  {
+   "layout": "two across the wind, 5 rotors apart",
+   "x_m": [
+    0.0,
+    0.0
+   ],
+   "y_m": [
+    0.0,
+    815.0
+   ],
+   "wind": "every sector alike",
+   "wake_model": "niayifar",
+   "gross_mwh": [
+    20490.5,
+    20490.5
+   ],
+   "after_wakes_mwh": [
+    20262.7,
+    20262.7
+   ],
+   "wake_loss_pct": [
+    1.112,
+    1.112
+   ],
+   "farm_wake_loss_pct": 1.112
+  },
+  {
+   "layout": "two across the wind, 5 rotors apart",
+   "x_m": [
+    0.0,
+    0.0
+   ],
+   "y_m": [
+    0.0,
+    815.0
+   ],
+   "wind": "every sector alike",
+   "wake_model": "jensen075",
+   "gross_mwh": [
+    20490.5,
+    20490.5
+   ],
+   "after_wakes_mwh": [
+    20250.3,
+    20250.3
+   ],
+   "wake_loss_pct": [
+    1.172,
+    1.172
+   ],
+   "farm_wake_loss_pct": 1.172
+  },
+  {
+   "layout": "two across the wind, 5 rotors apart",
+   "x_m": [
+    0.0,
+    0.0
+   ],
+   "y_m": [
+    0.0,
+    815.0
+   ],
+   "wind": "every sector alike",
+   "wake_model": "turbopark",
+   "gross_mwh": [
+    20490.5,
+    20490.5
+   ],
+   "after_wakes_mwh": [
+    20205.4,
+    20205.4
+   ],
+   "wake_loss_pct": [
+    1.391,
+    1.391
+   ],
+   "farm_wake_loss_pct": 1.391
+  },
+  {
+   "layout": "three rows of three, 7 rotors along and 5 across",
+   "x_m": [
+    0.0,
+    0.0,
+    0.0,
+    1141.0,
+    1141.0,
+    1141.0,
+    2282.0,
+    2282.0,
+    2282.0
+   ],
+   "y_m": [
+    0.0,
+    815.0,
+    1630.0,
+    0.0,
+    815.0,
+    1630.0,
+    0.0,
+    815.0,
+    1630.0
+   ],
+   "wind": "wind from the western sector only",
+   "wake_model": "niayifar",
+   "gross_mwh": [
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5
+   ],
+   "after_wakes_mwh": [
+    20490.5,
+    20490.5,
+    20490.5,
+    18873.1,
+    18873.0,
+    18873.1,
+    18728.1,
+    18687.4,
+    18728.1
+   ],
+   "wake_loss_pct": [
+    0.0,
+    0.0,
+    0.0,
+    7.894,
+    7.894,
+    7.894,
+    8.601,
+    8.8,
+    8.601
+   ],
+   "farm_wake_loss_pct": 5.52
+  },
+  {
+   "layout": "three rows of three, 7 rotors along and 5 across",
+   "x_m": [
+    0.0,
+    0.0,
+    0.0,
+    1141.0,
+    1141.0,
+    1141.0,
+    2282.0,
+    2282.0,
+    2282.0
+   ],
+   "y_m": [
+    0.0,
+    815.0,
+    1630.0,
+    0.0,
+    815.0,
+    1630.0,
+    0.0,
+    815.0,
+    1630.0
+   ],
+   "wind": "wind from the western sector only",
+   "wake_model": "jensen075",
+   "gross_mwh": [
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5
+   ],
+   "after_wakes_mwh": [
+    20490.5,
+    20490.5,
+    20490.5,
+    18701.5,
+    18701.5,
+    18701.5,
+    18387.6,
+    18325.2,
+    18387.6
+   ],
+   "wake_loss_pct": [
+    0.0,
+    0.0,
+    0.0,
+    8.731,
+    8.731,
+    8.731,
+    10.263,
+    10.568,
+    10.263
+   ],
+   "farm_wake_loss_pct": 6.365
+  },
+  {
+   "layout": "three rows of three, 7 rotors along and 5 across",
+   "x_m": [
+    0.0,
+    0.0,
+    0.0,
+    1141.0,
+    1141.0,
+    1141.0,
+    2282.0,
+    2282.0,
+    2282.0
+   ],
+   "y_m": [
+    0.0,
+    815.0,
+    1630.0,
+    0.0,
+    815.0,
+    1630.0,
+    0.0,
+    815.0,
+    1630.0
+   ],
+   "wind": "wind from the western sector only",
+   "wake_model": "turbopark",
+   "gross_mwh": [
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5
+   ],
+   "after_wakes_mwh": [
+    20490.5,
+    20490.5,
+    20490.5,
+    18172.1,
+    18172.1,
+    18172.1,
+    17696.3,
+    17691.7,
+    17696.3
+   ],
+   "wake_loss_pct": [
+    0.0,
+    0.0,
+    0.0,
+    11.315,
+    11.315,
+    11.315,
+    13.636,
+    13.659,
+    13.636
+   ],
+   "farm_wake_loss_pct": 8.32
+  },
+  {
+   "layout": "three rows of three, 7 rotors along and 5 across",
+   "x_m": [
+    0.0,
+    0.0,
+    0.0,
+    1141.0,
+    1141.0,
+    1141.0,
+    2282.0,
+    2282.0,
+    2282.0
+   ],
+   "y_m": [
+    0.0,
+    815.0,
+    1630.0,
+    0.0,
+    815.0,
+    1630.0,
+    0.0,
+    815.0,
+    1630.0
+   ],
+   "wind": "every sector alike",
+   "wake_model": "niayifar",
+   "gross_mwh": [
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5
+   ],
+   "after_wakes_mwh": [
+    19904.9,
+    19616.2,
+    19904.9,
+    19667.6,
+    19368.4,
+    19667.6,
+    19904.9,
+    19616.2,
+    19904.9
+   ],
+   "wake_loss_pct": [
+    2.858,
+    4.267,
+    2.858,
+    4.016,
+    5.476,
+    4.016,
+    2.858,
+    4.267,
+    2.858
+   ],
+   "farm_wake_loss_pct": 3.719
+  },
+  {
+   "layout": "three rows of three, 7 rotors along and 5 across",
+   "x_m": [
+    0.0,
+    0.0,
+    0.0,
+    1141.0,
+    1141.0,
+    1141.0,
+    2282.0,
+    2282.0,
+    2282.0
+   ],
+   "y_m": [
+    0.0,
+    815.0,
+    1630.0,
+    0.0,
+    815.0,
+    1630.0,
+    0.0,
+    815.0,
+    1630.0
+   ],
+   "wind": "every sector alike",
+   "wake_model": "jensen075",
+   "gross_mwh": [
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5
+   ],
+   "after_wakes_mwh": [
+    19812.7,
+    19531.2,
+    19812.7,
+    19568.1,
+    19271.9,
+    19568.1,
+    19812.7,
+    19531.2,
+    19812.7
+   ],
+   "wake_loss_pct": [
+    3.308,
+    4.682,
+    3.308,
+    4.502,
+    5.947,
+    4.502,
+    3.308,
+    4.682,
+    3.308
+   ],
+   "farm_wake_loss_pct": 4.172
+  },
+  {
+   "layout": "three rows of three, 7 rotors along and 5 across",
+   "x_m": [
+    0.0,
+    0.0,
+    0.0,
+    1141.0,
+    1141.0,
+    1141.0,
+    2282.0,
+    2282.0,
+    2282.0
+   ],
+   "y_m": [
+    0.0,
+    815.0,
+    1630.0,
+    0.0,
+    815.0,
+    1630.0,
+    0.0,
+    815.0,
+    1630.0
+   ],
+   "wind": "every sector alike",
+   "wake_model": "turbopark",
+   "gross_mwh": [
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5,
+    20490.5
+   ],
+   "after_wakes_mwh": [
+    19550.9,
+    19220.1,
+    19550.9,
+    19249.0,
+    18916.3,
+    19249.0,
+    19550.9,
+    19220.1,
+    19550.9
+   ],
+   "wake_loss_pct": [
+    4.586,
+    6.2,
+    4.586,
+    6.059,
+    7.683,
+    6.059,
+    4.586,
+    6.2,
+    4.586
+   ],
+   "farm_wake_loss_pct": 5.616
+  }
+ ]
+}

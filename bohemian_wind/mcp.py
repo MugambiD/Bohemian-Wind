@@ -6,8 +6,8 @@ The assistant starts this program on your own computer and talks to it through i
 one JSON-RPC message a line. Nothing listens on the network and nothing is sent anywhere by this server; a step
 that downloads public data (reanalysis, terrain) does so exactly as it does from the application.
 
-The assistant gets five tools: see what state a project is in, run steps, read the results of a step, read the
-provenance record, and make the demo project. Every figure comes from the same engine as in the application. The
+The assistant gets eight tools: see what state a project is in, run steps, read the results of a step, read the
+provenance record, keep, list and compare alternative layouts, and make the demo project. Every figure comes from the same engine as in the application. The
 assistant can ask for a run and read what came out; it cannot put a number into a result.
 
 To connect it, name the command in the assistant's list of MCP servers, for example:
@@ -43,6 +43,15 @@ TOOLS = [
      "description": "The provenance record of a project: program version, settings, marks of the input files, methods and "
                     "main figures of every step.",
      "inputSchema": {"type": "object", "properties": {"folder": _FOLDER}, "required": ["folder"]}},
+    {"name": "list_layouts", "description": "The alternative layouts kept in a project, with turbines and net P50.",
+     "inputSchema": {"type": "object", "properties": {"folder": _FOLDER}, "required": ["folder"]}},
+    {"name": "save_layout", "description": "Keep the project's present layout (and its screening, when up to date) under a name.",
+     "inputSchema": {"type": "object", "properties": {"folder": _FOLDER, "name": {"type": "string"}}, "required": ["folder", "name"]}},
+    {"name": "compare_layouts",
+     "description": "Set two kept layouts against each other: energy, wake loss, cost of energy, homes affected, turbines moved, "
+                    "turbine by turbine, with warnings when the two did not rest on the same inputs.",
+     "inputSchema": {"type": "object", "properties": {"folder": _FOLDER, "a": {"type": "string"}, "b": {"type": "string"}},
+                     "required": ["folder", "a", "b"]}},
     {"name": "create_demo",
      "description": "Create the demo project (invented data) in a new folder and run every step.",
      "inputSchema": {"type": "object", "properties": {"folder": {"type": "string", "description": "Folder to create it in."}},
@@ -102,6 +111,15 @@ def call(name: str, args: dict) -> str:
         memo = {}
         return json.dumps({"step": step, "status": project.status(step, memo), "result": _short(res), "notice": APP_NOTICE},
                           indent=1, default=str)[:MAX_TEXT]
+    if name in ("list_layouts", "save_layout", "compare_layouts"):
+        from . import layouts  # noqa: PLC0415
+        if name == "list_layouts":
+            got = layouts.listing(project)
+        elif name == "save_layout":
+            got = {k: v for k, v in layouts.save(project, str(args.get("name") or "")).items() if k != "positions"}
+        else:
+            got = layouts.compare(project, str(args.get("a") or ""), str(args.get("b") or ""))
+        return json.dumps(_short(got), indent=1, default=str)[:MAX_TEXT]
     if name == "get_provenance":
         return json.dumps(provenance.record(project), indent=1, default=str)[:MAX_TEXT]
     raise ValueError(f"Unknown tool {name!r}.")

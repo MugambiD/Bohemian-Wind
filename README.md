@@ -96,7 +96,7 @@ It runs step 1 if new files arrived, records what is new in `intake/status.json`
 
 ## Where each part stands
 
-Honest status of this version (0.3.4-dev). "Working" means it runs end to end and is covered by tests with known answers; it does not mean validated against measurements.
+Honest status of this version (0.3.5-dev). "Working" means it runs end to end and is covered by tests with known answers; it does not mean validated against measurements.
 
 | Capability | State |
 |---|---|
@@ -111,6 +111,7 @@ Honest status of this version (0.3.4-dev). "Working" means it runs end to end an
 | Losses and P50/P90 | **Working with default assumptions** that you can edit. The uncertainty rules were set against measured masts in house, and they are still a developer's budget, not an assessor's. |
 | Shadow flicker and noise | **Working at screening level:** astronomical worst-case flicker; noise after ISO 9613-2 at one frequency. |
 | Expected flicker, flicker budget, quiet modes | **First version, new in 0.3.3-dev.** Expected flicker hours from the wind rose, running time and a sunshine share you enter; the energy cost of keeping homes to a flicker budget; quiet modes that bring homes within the noise level, from mode data you enter. Tested on invented cases with known answers; not yet compared with another program. Set in the project file, not yet on the screens. |
+| Alternative layouts compared | **First version, new in 0.3.5-dev (on main, not yet in a download).** Keep a layout under a name, copy it, move turbines, run it and set the two side by side: energy, wake loss, cost of energy and homes affected, in amounts and percentages, turbine by turbine. From the command line and for AI assistants; not yet on the screens, and no map editor yet. |
 | Cost of energy | **First version, new in 0.3.3-dev.** A first cost of energy from costs you enter, with cables and roads along the shortest tree; the layout can be fine-tuned for it. A figure for comparing layouts, not a financial model and not a full optimiser. |
 | Use by AI assistants and scripts | **First version, new in 0.3.3-dev.** Every step runs from the command line; each project keeps a provenance record; a connector lets an AI assistant run steps and read results on your computer. No AI takes part in any calculation. See [AI and your data](docs/ai-and-data.md). |
 | Your own exclusion zones and buffers | **Working.** GeoJSON, KML, KMZ or CSV; buffers round zones, along lines and from homes; slope and elevation limits. |

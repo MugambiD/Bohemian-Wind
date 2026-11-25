@@ -6,6 +6,7 @@
     python -m bohemian_wind demo FOLDER          create the demo project in FOLDER and run every step
     python -m bohemian_wind run FOLDER [STEP..]  run steps of a project (default: all six)
     python -m bohemian_wind results FOLDER       what the project holds, as JSON: status and main figures of every step
+    python -m bohemian_wind layout ...           keep alternative layouts and compare them (see: layout --help, layouts.py)
     python -m bohemian_wind mcp                  serve the project tools to an AI assistant on this computer (see mcp.py)
     python -m bohemian_wind validate             run the validation cases with known answers and print the table
     python -m bohemian_wind check FOLDER         daily intake, once: re-run step 1 if new logger files arrived
@@ -21,7 +22,7 @@ import sys
 
 from . import APP_NOTICE, __version__
 
-COMMANDS = ("app", "desktop", "demo", "run", "results", "mcp", "validate", "check", "watch", "qc")
+COMMANDS = ("app", "desktop", "demo", "run", "results", "layout", "mcp", "validate", "check", "watch", "qc")
 
 
 def main(argv=None) -> int:
@@ -36,6 +37,9 @@ def main(argv=None) -> int:
     if argv[0] == "desktop":
         from .app.desktop import main as desktop_main
         return desktop_main(argv[1:])
+    if argv[0] == "layout":
+        from .layouts import main as layout_main
+        return layout_main(argv[1:])
     if argv[0] == "mcp":
         from .mcp import main as mcp_main
         return mcp_main()

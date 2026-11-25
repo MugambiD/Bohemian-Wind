@@ -106,6 +106,91 @@ def cases() -> list:
     add("Cost of energy", "four 4.5 MW turbines on that square, 60,000 MWh a year", "per MWh",
         ((1_400_000 * 18 + 400 * 3000) * crf + 40_000 * 18) / 60_000.0, res["cost_of_energy_per_mwh"], 1e-6,
         "arithmetic by hand from the same inputs")
+    out += _wake_cases(add)
+    return out
+
+
+BENCH_D = 163.0            # rotor of the benchmark turbine, m
+
+
+def _bench():
+    from .energy import wakes  # noqa: PLC0415
+    from .energy.turbine import Turbine, generic_model  # noqa: PLC0415
+    wt = generic_model(Turbine("Generic 4.5 MW / 163 m", 4500, BENCH_D, 120), 1.225, 0.10)
+    cen = np.arange(0.0, 360.0, 30.0)
+    A, k = np.full(12, 8.5), np.full(12, 2.2)
+
+    def run(x, y, freq, model="jensen075"):
+        site = wakes.site_for(np.ones((len(x), 12)), cen, np.asarray(freq, dtype=float), A, k, 0.10)
+        return wakes.simulate(site, wt, np.asarray(x, dtype=float), np.asarray(y, dtype=float), model)
+    return wt, run, wakes
+
+
+def _layouts() -> dict:
+    D = BENCH_D
+    return {"one turbine": ([0.0], [0.0]), "two in line with the wind, 5 rotors apart": ([0.0, 5 * D], [0.0, 0.0]),
+            "two across the wind, 5 rotors apart": ([0.0, 0.0], [0.0, 5 * D]),
+            "three rows of three, 7 rotors along and 5 across": ([i * 7 * D for i in range(3) for _ in range(3)],
+                                                                 [j * 5 * D for _ in range(3) for j in range(3)])}
+
+
+def _wake_cases(add) -> list:
+    """Energy and wakes on flat ground with the generic 4.5 MW, 163 m turbine and one wind climate (Weibull A 8.5 m/s,
+    k 2.2 in every sector). What must hold is known without the program: the energy of one turbine from its curve
+    and the wind distribution, no loss where no wake can reach, and the same loss when the layout and the wind are
+    both turned round."""
+    wt, run, wakes = _bench()
+    D = BENCH_D
+    even, west, east = np.ones(12) / 12, np.eye(12)[9], np.eye(12)[3]
+    lay = _layouts()
+    g, n = run(*lay["one turbine"], even)
+    v = np.arange(0.005, 40.0, 0.01)
+    pdf = (2.2 / 8.5) * (v / 8.5) ** 1.2 * np.exp(-(v / 8.5) ** 2.2)
+    hand = float((pdf * np.asarray(wt.power(v), dtype=float) / 1e6).sum() * 0.01 * wakes.HOURS)
+    add("Energy, one turbine", "gross energy a year against the power curve summed over the wind distribution in 0.01 m/s steps", "ratio",
+        1.0, g[0] / hand, 0.002, "the same curve and Weibull distribution summed by hand, finer than the program's bins")
+    add("Wakes, one turbine", "wake loss of a turbine standing alone", "%", 0.0, 100 * (1 - n[0] / g[0]), 1e-9, "nothing stands upwind")
+    for model in wakes.WAKE_MODELS:
+        g, n = run(*lay["two in line with the wind, 5 rotors apart"], west, model)
+        g2, n2 = run(*lay["two in line with the wind, 5 rotors apart"], east, model)
+        add(f"Wakes, two in line ({model})", "wake loss of the upwind turbine, wind from the west only", "%", 0.0, 100 * (1 - n[0] / g[0]), 1e-6,
+            "nothing stands upwind of it")
+        add(f"Wakes, two in line ({model})", "loss of the downwind turbine with the wind from the west, less the other's with the wind from the east", "%",
+            0.0, 100 * (1 - n[1] / g[1]) - 100 * (1 - n2[0] / g2[0]), 1e-6, "symmetry: turning the wind round swaps the two")
+    g, n = run(*lay["two across the wind, 5 rotors apart"], west, "jensen075")
+    add("Wakes, two across the wind (jensen075)", "wake loss of either turbine, wind from the western sector only", "%", 0.0,
+        float(100 * (1 - n / g).max()), 1e-9,
+        "geometry: within 15 degrees of west the other turbine is at most 1.3 rotors downwind and 4.8 across, outside a wake 0.6 rotors wide")
+    g, n = run(*lay["three rows of three, 7 rotors along and 5 across"], west, "jensen075")
+    loss = 100 * (1 - n / g)
+    add("Wakes, three rows of three (jensen075)", "largest wake loss in the front row, wind from the west only", "%", 0.0, float(loss[:3].max()), 1e-9,
+        "nothing stands upwind of the front row")
+    add("Wakes, three rows of three (jensen075)", "does the back row lose more than the row before it (1 = yes)", "",
+        1.0, 1.0 if loss[7] > loss[4] else 0.0, 0.0, "two turbines upwind take more wind than one")
+    wide = ([i * 10 * D for i in range(3) for _ in range(3)], lay["three rows of three, 7 rotors along and 5 across"][1])
+    g3, n3 = run(*wide, west, "jensen075")
+    add("Wakes, three rows of three (jensen075)", "farm wake loss with the rows 10 rotors apart, over that with 7", "ratio",
+        0.6, (1 - n3.sum() / g3.sum()) / (1 - n.sum() / g.sum()), 0.25, "wakes recover with distance: wider rows must lose less")
+    return []
+
+
+def benchmark() -> dict:
+    """The figures of the wake benchmark, turbine by turbine and model by model, for anyone to set another
+    calculation against: flat ground, the generic 4.5 MW / 163 m turbine at 120 m, air density 1.225 kg/m3,
+    turbulence intensity 10 %, Weibull A 8.5 m/s and k 2.2. Positions in metres, x to the east and y to the north."""
+    _, run, wakes = _bench()
+    roses = {"wind from the western sector only": np.eye(12)[9], "every sector alike": np.ones(12) / 12}
+    out = {"turbine": "generic 4.5 MW, 163 m rotor, 120 m hub (bohemian_wind.energy.turbine.generic_model)", "air_density": 1.225,
+           "turbulence_intensity": 0.10, "weibull": {"A": 8.5, "k": 2.2}, "sectors": 12, "hours_per_year": wakes.HOURS, "cases": []}
+    for name, (x, y) in _layouts().items():
+        for rose, f in roses.items():
+            for model in wakes.WAKE_MODELS:
+                g, n = run(x, y, f, model)
+                out["cases"].append({"layout": name, "x_m": [round(v, 1) for v in x], "y_m": [round(v, 1) for v in y], "wind": rose,
+                                     "wake_model": model, "gross_mwh": [round(float(v), 1) for v in g],
+                                     "after_wakes_mwh": [round(float(v), 1) for v in n],
+                                     "wake_loss_pct": [round(float(100 * (1 - b / a)), 3) for a, b in zip(g, n)],
+                                     "farm_wake_loss_pct": round(float(100 * (1 - n.sum() / g.sum())), 3)})
     return out
 
 
@@ -129,6 +214,8 @@ def main(argv=None) -> int:
         folder = Path(argv[argv.index("--write") + 1])
         folder.mkdir(parents=True, exist_ok=True)
         (folder / f"{__version__}.json").write_text(json.dumps({"version": __version__, "cases": rows}, indent=1) + "\n", encoding="utf-8")
+        (folder / f"wake-benchmark-{__version__}.json").write_text(json.dumps({"version": __version__, **benchmark()}, indent=1) + "\n",
+                                                                   encoding="utf-8")
         (folder / "latest.md").write_text(
             f"# Validation cases: results of version {__version__}\n\n"
             "Written by `bohemian-wind validate --write docs/validation`. What the cases are and what they do not show: "
