@@ -1,0 +1,115 @@
+{
+ "version": "0.3.3-dev",
+ "cases": [
+  {
+   "case": "Shadow flicker, worst case",
+   "quantity": "minutes in flicker on 20 March, home 500 m west of one turbine on the equator",
+   "unit": "min",
+   "expected": 45.0533,
+   "got": 46.0,
+   "tolerance": 2.0,
+   "basis": "geometry: the rotor's apparent diameter divided by the sun's 15 degrees an hour",
+   "passed": true
+  },
+  {
+   "case": "Shadow flicker, expected case",
+   "quantity": "hours a year with the wind always from the north (rotor edge-on to the home)",
+   "unit": "h",
+   "expected": 0.0,
+   "got": 0.0,
+   "tolerance": 0.0,
+   "basis": "geometry: a disc seen edge-on casts no shadow on the home",
+   "passed": true
+  },
+  {
+   "case": "Shadow flicker, expected case",
+   "quantity": "hours with half the sunshine and running 80 % of the time, over hours with all of both",
+   "unit": "ratio",
+   "expected": 0.4,
+   "got": 0.3988,
+   "tolerance": 0.005,
+   "basis": "arithmetic: 0.5 x 0.8",
+   "passed": true
+  },
+  {
+   "case": "Shadow flicker, expected case",
+   "quantity": "hours with the rotor always facing the home, over the worst case",
+   "unit": "ratio",
+   "expected": 1.0,
+   "got": 0.9764,
+   "tolerance": 0.08,
+   "basis": "geometry: a disc facing the home fills nearly the sphere the worst case assumes",
+   "passed": true
+  },
+  {
+   "case": "Shadow flicker, budget",
+   "quantity": "hours the turbine is stopped to bring the home down to 10 expected hours",
+   "unit": "h",
+   "expected": 23.1,
+   "got": 23.1,
+   "tolerance": 0.15,
+   "basis": "arithmetic: expected hours less the budget",
+   "passed": true
+  },
+  {
+   "case": "Noise, ISO 9613-2",
+   "quantity": "level 500 m from one turbine of 105 dB(A), flat ground",
+   "unit": "dB(A)",
+   "expected": 40.6859,
+   "got": 40.7,
+   "tolerance": 0.06,
+   "basis": "the method's formula written out by hand: spreading, air absorption, ground, reflection near the source",
+   "passed": true
+  },
+  {
+   "case": "Noise, ISO 9613-2",
+   "quantity": "two equal turbines at one place against one",
+   "unit": "dB",
+   "expected": 3.0103,
+   "got": 3.0,
+   "tolerance": 0.11,
+   "basis": "arithmetic: 10 log10(2)",
+   "passed": true
+  },
+  {
+   "case": "Noise, quiet modes",
+   "quantity": "energy given up to bring a home 2 dB over the limit within it (modes: 3 dB for 4 %, 6 dB for 12 %)",
+   "unit": "%",
+   "expected": 4.0,
+   "got": 4.0,
+   "tolerance": 0.0,
+   "basis": "by hand: the 3 dB mode is enough and costs 4 %",
+   "passed": true
+  },
+  {
+   "case": "Cost of energy",
+   "quantity": "shortest tree linking the corners of a 1,000 m square",
+   "unit": "m",
+   "expected": 3000.0,
+   "got": 3000.0,
+   "tolerance": 0.0,
+   "basis": "geometry: three sides",
+   "passed": true
+  },
+  {
+   "case": "Cost of energy",
+   "quantity": "capital recovery factor, 8 % over 25 years",
+   "unit": "",
+   "expected": 0.0937,
+   "got": 0.0937,
+   "tolerance": 1e-09,
+   "basis": "the annuity formula written out by hand",
+   "passed": true
+  },
+  {
+   "case": "Cost of energy",
+   "quantity": "four 4.5 MW turbines on that square, 60,000 MWh a year",
+   "unit": "per MWh",
+   "expected": 53.2187,
+   "got": 53.2187,
+   "tolerance": 1e-06,
+   "basis": "arithmetic by hand from the same inputs",
+   "passed": true
+  }
+ ]
+}

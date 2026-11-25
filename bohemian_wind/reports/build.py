@@ -540,6 +540,27 @@ def wind_resource(project, path, date: datetime | None = None) -> Path:
     return doc.save(path)
 
 
+def _screening_extras(nz: dict, fl: dict) -> list:
+    """Rows for what the screening adds when its settings are filled in: the expected case of shadow flicker, the
+    budget and what keeping to it costs, and the quiet modes that bring the homes within the noise level."""
+    rows = []
+    ex, bud, qm = fl.get("expected"), fl.get("budget"), nz.get("quiet_modes")
+    if ex:
+        sun = "sunshine share as entered" if ex.get("sunshine_entered") else "no sunshine share entered: the sun taken to shine all day"
+        rows.append(("Shadow flicker: expected case", f"highest {ex['highest_hours']:.0f} hours a year (rotor across the wind of each "
+                     f"sector, running {ex['running_share_pct']:.0f} % of the time; {sun}). Hills, trees and walls still ignored"))
+    if bud:
+        rows.append(("Shadow flicker: budget", f"{bud['hours']:g} expected hours a year per home: {bud['homes_over']:,} homes over it; "
+                     f"stopping the turbines as far as needed costs {bud['shutdown_loss_pct']:.2f} % of the energy"))
+    if qm:
+        which = ", ".join(f"{t} in {m}" for t, m in (qm.get("by_turbine") or {}).items()) or "none needed"
+        rows.append(("Noise: quiet modes", f"{which}; cost {qm['energy_loss_pct']:.2f} % of the energy; "
+                     + ("every home then within the level used" if qm["within_limit"]
+                        else f"{qm['homes_over_after']:,} homes stay above the level used with the modes entered")
+                     + ". Modes and their energy as entered by the user"))
+    return rows
+
+
 def _stage_rows(src: Source) -> list:
     """One row per step of the analysis: its name, how far it is, and its main result so far."""
     p, c = src.p, src.clim
@@ -798,6 +819,9 @@ def _energy_rows(lay: dict) -> list:
             ("Wake loss", f"{lay['wake_loss_pct']:.1f} % ({lay['wake_model_name']})"),
             ("Other losses", f"{lay['other_loss_pct']:.1f} %"),
             ("Net energy, P50", f"{lay['p50_gwh']:.1f} GWh a year"),
+            *([("Cost of energy, first figure", f"{lay['cost']['cost_of_energy_per_mwh']:.1f} {lay['cost']['currency']} per MWh "
+                f"({lay['cost']['link_m'] / 1000:.1f} km of cables and roads; from the costs entered; not a financial model)")]
+              if (lay.get("cost") or {}).get("cost_of_energy_per_mwh") else []),
             ("Capacity factor; full-load hours", f"{100 * lay['capacity_factor']:.1f} %; {lay.get('full_load_hours', 0):,.0f} h"),
             ("Uncertainty of the energy (1 σ)", f"{u['sigma_pct']['10_year']:.1f} % over 10 years; {u['sigma_pct']['1_year']:.1f} % for a single year"),
             ("P75 / P90, 10-year average", f"{u['p75_10_year']:.1f} / {u['p90_10_year']:.1f} GWh a year"),
@@ -920,7 +944,8 @@ def micrositing(project, path, date: datetime | None = None) -> Path:
                 ("Noise: level used", f"{nz['limit_dba']:g} dB(A); sound power {nz['sound_power_dba']:g} dB(A) per turbine"),
                 ("Noise: homes above the level", f"{nz['over_limit']:,} ({nz['over_limit_with_uncertainty']:,} with a {nz['uncertainty_db']:g} dB allowance); highest {nz['highest_dba']:.1f} dB(A)"),
                 ("Shadow flicker: limits used", f"{fl['limit_hours_year']:g} hours a year or {fl['limit_min_day']:g} minutes a day, astronomical worst case"),
-                ("Shadow flicker: homes", f"{fl['with_any_flicker']:,} could see flicker; {fl['over_limit']:,} above a limit; highest {fl['highest_hours']:.0f} hours a year")],
+                ("Shadow flicker: homes", f"{fl['with_any_flicker']:,} could see flicker; {fl['over_limit']:,} above a limit; highest {fl['highest_hours']:.0f} hours a year"),
+                *_screening_extras(nz, fl)],
                caption="Noise and shadow flicker screening")
         doc.figure(f / env["noise_map_print"] if env.get("noise_map_print") else None, "Noise screening", 14)
         doc.figure(f / env["flicker_map_print"] if env.get("flicker_map_print") else None, "Shadow flicker screening, worst case", 14)

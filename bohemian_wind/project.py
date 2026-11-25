@@ -55,6 +55,12 @@ RESTS_ON = {"data": (), "longterm": ("data",), "map": ("data", "longterm"), "lay
             "pack": ("data", "longterm", "map", "layout", "environment")}
 
 
+def _without_unset(section: dict, unset: dict) -> dict:
+    """The section without the later-added settings that are still as they come: a project made before they
+    existed is then not out of date for their sake."""
+    return {k: v for k, v in section.items() if not (k in unset and any(v == u for u in unset[k]))}
+
+
 def _feed_longterm(s: dict) -> dict:
     cfg = s["longterm"]
     by_file = cfg.get("source") == "file"          # the files count only when the reference is read from them
@@ -82,8 +88,9 @@ FEEDS = {
                        "clock": s["data"].get("clock_corrections") or []},
     "longterm": _feed_longterm,
     "map": _feed_map,
-    "layout": lambda s: dict(s["layout"]),
-    "environment": lambda s: dict(s["environment"]),
+    "layout": lambda s: _without_unset(s["layout"], {"objective": ("energy", None, ""), "costs": ({}, None)}),
+    "environment": lambda s: _without_unset(s["environment"], {"sunshine_share": (None, "", []), "flicker_budget_hours": (None, ""),
+                                                               "noise_modes": ([], None)}),
     "pack": lambda s: {"name": s["name"]},
 }
 _FILE_MARKS: dict = {}
@@ -178,6 +185,11 @@ def defaults() -> dict:
                 "cfd_resolution": "quick"},
         "layout": {"turbine": "4.5 MW, 163 m rotor", "rated_kw": 4500.0, "rotor_m": 163.0, "hub_m": 120.0,
                    "n_turbines": 10, "cross_d": 3.0, "along_d": 7.0, "link_m": 2500.0, "wake": "niayifar", "refine": True,
+                   # what the fine-tuning aims at: "energy", or "cost" (cost of energy; needs the costs below)
+                   "objective": "energy",
+                   # for a cost of energy: {"capex_per_mw": 1400000, "opex_per_mw_year": 40000, "link_per_m": 350, "years": 25,
+                   # "discount_pct": 8, "currency": "USD", "connection": {"lat": .., "lon": ..}} (bohemian_wind.energy.cost)
+                   "costs": {},
                    "exclusions_file": "", "receptors_file": "", "boundary_file": "",
                    # buildings fetched from open data (environment.buildings): the homes file above goes on top of them
                    "buildings_file": "",
@@ -187,7 +199,15 @@ def defaults() -> dict:
                              "receptor_setback_m": 500.0, "min_mean_ws": None, "elevation_max_m": None},
                    "losses": budget.losses_table()},
         "environment": {"sound_power_dba": 105.0, "noise_limit_dba": 45.0, "flicker_hours_limit": 30.0,
-                        "flicker_minutes_limit": 30.0, "year": date.today().year + 1},
+                        "flicker_minutes_limit": 30.0, "year": date.today().year + 1,
+                        # expected flicker: the share of daylight with direct sun, one value or twelve (January first), 0 to 1;
+                        # empty = the sun is taken to shine all day
+                        "sunshine_share": None,
+                        # expected hours a year a home may have; over it, the turbines are stopped as far as needed
+                        "flicker_budget_hours": None,
+                        # quiet modes of the turbine, from its manufacturer: [{"name": "Mode 1", "sound_power_dba": 103,
+                        # "energy_pct": 97}, ...]; with them, the modes that bring every home within the noise limit are found
+                        "noise_modes": []},
         "results": {},
     }
 
@@ -398,6 +418,9 @@ class Project:
             summary["inputs"] = self.inputs(step)
         self.s["results"][step] = summary
         self.save()
+        if step in STEPS:
+            from . import provenance  # noqa: PLC0415
+            provenance.write(self)
         return summary
 
     def _stamp(self, step: str) -> str:
@@ -655,6 +678,34 @@ class Project:
         included) or see shadow flicker, by the methods of step 5. Beyond it neither can happen."""
         from .environment import flicker, noise  # noqa: PLC0415
         return max(noise.reach_m(lw, limit - noise.UNCERTAINTY_DB, n_turbines), flicker.MAX_DISTANCE_ROTORS * rotor_m)
+
+    def flicker_expected(self, turbines: list, t: dict) -> dict | None:
+        """The figures for the expected case of shadow flicker: the wind rose at the hub, the share of the time each
+        turbine runs in each sector (wind between cut-in and cut-out, the sector's Weibull scaled to the turbine's
+        own mean wind), and the sunshine share as entered. None when the climate cannot give them."""
+        from . import climate as _climate  # noqa: PLC0415
+        try:
+            clim = self.climate()
+            centres, f, A, k = _climate.at_height(clim, float(t["hub_m"]), alpha=self.alpha(clim)[0], factor=self.speed_scale(clim)["scale"])
+        except Exception:  # noqa: BLE001  (an older project without what this needs: the worst case still stands)
+            return None
+        f, A, k = (np.asarray(v, dtype=float) for v in (f, A, k))
+        lay = self.result("layout") or {}
+        mast = float(lay.get("mast_mean_ws") or 0.0)
+        cut_in, cut_out = float(t.get("cut_in", 3.0)), float(t.get("cut_out", 25.0))
+        run = np.zeros((len(turbines), len(f)))
+        for j, q in enumerate(turbines):
+            a = A * (float(q["free_ws"]) / mast if mast > 0 and q.get("free_ws") else 1.0)
+            run[j] = np.exp(-(cut_in / a) ** k) - np.exp(-(cut_out / a) ** k)
+        sun = self.s["environment"].get("sunshine_share")
+        if sun not in (None, "", []):
+            vals = [_num(v, "Sunshine share", 0, 1) for v in (sun if isinstance(sun, (list, tuple)) else [sun])]
+            if len(vals) not in (1, 12):
+                raise ProjectError("The sunshine share is one value for the whole year, or twelve, January first.")
+            sun = vals if len(vals) == 12 else vals[0]
+        else:
+            sun = None
+        return {"centres": [float(c) for c in centres], "freq": f, "run": run, "sunshine": sun}
 
     def buildings_half_km(self) -> float:
         """How far from the mast the buildings are fetched (half the side of the square): the search radius of step 4,
@@ -1063,7 +1114,7 @@ class Project:
 
     def run_layout(self, log=print) -> dict:
         from . import maps  # noqa: PLC0415
-        from .energy import EnergyError, assess  # noqa: PLC0415
+        from .energy import EnergyError, assess, cost  # noqa: PLC0415
         from .energy.turbine import air_density  # noqa: PLC0415
         from .environment import constraints  # noqa: PLC0415
         self._guard("layout")
@@ -1136,6 +1187,14 @@ class Project:
                 + (f" {len(beyond)} more {'lies' if len(beyond) == 1 else 'lie'} farther out ({max(g['dist_km'] for g in beyond):.1f} km "
                    f"at most) and {'is' if len(beyond) == 1 else 'are'} left out." if beyond else ""))
         try:
+            costs = cost.read(L.get("costs"))
+        except cost.CostError as e:
+            raise ProjectError(str(e)) from e
+        if costs is not None and isinstance((L.get("costs") or {}).get("connection"), dict):
+            cp = L["costs"]["connection"]
+            costs.connection_xy = tuple(float(v) for v in grid.to_xy(_num(cp.get("lat"), "Connection point latitude", -90, 90),
+                                                                     _num(cp.get("lon"), "Connection point longitude", -180, 180)))
+        try:
             res = assess.design(wf, clim, mask, turbine, n, lt_factor=scale["scale"], alpha=alpha, rho_hub=rho, fixed_xy=fixed,
                                 cross_d=_num(L.get("cross_d"), "Spacing across the wind", 1.5, 15),
                                 along_d=_num(L.get("along_d"), "Spacing along the wind", 1.5, 20),
@@ -1143,9 +1202,14 @@ class Project:
                                 wake=L.get("wake") or "niayifar", refine=bool(L.get("refine")), refine_seconds=45.0,
                                 losses=L.get("losses"), top_m=clim.get("height_m"),
                                 profile_clean=not (clim.get("shear") or {}).get("warning"),
-                                long_term=self.long_term_uncertainty(clim), log=log)
+                                long_term=self.long_term_uncertainty(clim), costs=costs,
+                                objective=str(L.get("objective") or "energy"), log=log)
         except EnergyError as e:
             raise ProjectError(str(e)) from e
+        if res.get("cost"):
+            c = res["cost"]
+            log(f"Cost of energy {c['cost_of_energy_per_mwh']:.1f} {c['currency']} per MWh ({c['link_m'] / 1000:.1f} km of cables "
+                "and roads): a first figure for comparing layouts, not a financial model.")
         res["notes"] = res["notes"] + [n[0].upper() + n[1:] + "." for n in (f_note, a_note, self.vane_offset()[1]) if n] + (
             [scale["lean"]] if scale["lean"] else []) + [f"Air density at hub height {rho:.3f} kg/m3 ({rho_src})."]
         res["annual_mean_ws"], res["annual_mean_height_m"], res["climate_scale"] = scale["mean_ws"], clim["height_m"], scale["scale"]
@@ -1273,10 +1337,32 @@ class Project:
         log(f"  Highest level {nz['highest_dba']:.1f} dB(A); {nz['over_limit']} homes over {limit:g} dB(A); the nearest "
             f"home is {nz['nearest_home_m']:.0f} m from a turbine.")
         log(f"Shadow flicker for {year}, every minute of daylight ...")
+        expected, budget_h = self.flicker_expected(turbines, t), _num(E.get("flicker_budget_hours"), "Flicker budget, hours a year", 0, 500, True)
         fl = flicker.at_receptors(grid, turbines, receptors, hub, rotor, year, step_min=1, limit_hours_year=h_lim,
-                                  limit_min_day=m_lim)
+                                  limit_min_day=m_lim, expected=expected, budget_hours=budget_h)
         log(f"  {fl['with_any_flicker']} homes with any flicker; {fl['over_limit']} over a limit "
             f"(worst case: {fl['highest_hours']:.0f} hours a year).")
+        if fl.get("expected"):
+            log(f"  Expected case: {fl['expected']['highest_hours']:.0f} hours a year at the most affected home"
+                + ("" if fl["expected"]["sunshine_entered"] else " (no sunshine share entered: the sun is taken to shine all day)") + ".")
+        if fl.get("budget"):
+            b = fl["budget"]
+            log(f"  Budget of {b['hours']:g} expected hours a year: {b['homes_over']} homes over it; stopping the turbines as far "
+                f"as needed costs {b['shutdown_loss_pct']:.2f} % of the energy.")
+        if E.get("noise_modes"):
+            from .environment import modes  # noqa: PLC0415
+            try:
+                table = modes.read_modes(E["noise_modes"], lw)
+            except modes.ModesError as e:
+                raise ProjectError(str(e)) from e
+            nz["quiet_modes"] = modes.strategy(noise.propagation(grid, turbines, receptors, hub), limit, table,
+                                               energy=[q.get("p50_mwh", 1.0) for q in turbines])
+            nz["quiet_modes"]["by_turbine"] = {q.get("id", str(i + 1)): m for i, (q, m) in enumerate(zip(turbines, nz["quiet_modes"]["modes"]))
+                                               if m != "full"}
+            qm = nz["quiet_modes"]
+            log(f"  Quiet modes: {qm['turbines_in_quiet_mode']} turbines run quieter, costing {qm['energy_loss_pct']:.2f} % of the "
+                f"energy; " + ("every home is then within the limit." if qm["within_limit"]
+                               else f"{qm['homes_over_after']} homes stay over the limit even so."))
         levels = noise.on_grid(grid, turbines, hub, lw)
         sub_n = f"{self.s['name']}: sound power {lw:g} dB(A) per turbine; screening after ISO 9613-2"
         sub_f = f"{self.s['name']}: astronomical worst case for {year}; limits {h_lim:g} h a year, {m_lim:g} min a day"
@@ -1296,10 +1382,11 @@ class Project:
         with open(self.path("environment", "flicker_at_homes.csv"), "w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
             w.writerow(["home", "latitude", "longitude", "hours_per_year_worst_case", "max_minutes_per_day", "days_with_flicker",
-                        "over_limit", "turbines", "nearest_turbine_m"])
+                        "over_limit", "turbines", "nearest_turbine_m", "hours_per_year_expected", "over_budget"])
             for r in fl["receptors"]:
                 w.writerow([r["name"], r["lat"], r["lon"], r["hours_per_year"], r["max_minutes_per_day"], r["days_with_flicker"],
-                            "yes" if r["over_limit"] else "no", " ".join(r["turbines"]), r["nearest_turbine_m"]])
+                            "yes" if r["over_limit"] else "no", " ".join(r["turbines"]), r["nearest_turbine_m"],
+                            r.get("expected_hours_per_year", ""), {True: "yes", False: "no"}.get(r.get("over_budget"), "")])
         out["noise_csv"], out["flicker_csv"] = "environment/noise_at_homes.csv", "environment/flicker_at_homes.csv"
         tx, ty = np.array([q["x"] for q in turbines], dtype=float), np.array([q["y"] for q in turbines], dtype=float)
         reach = self.reach_m(lw, limit, len(turbines), rotor)

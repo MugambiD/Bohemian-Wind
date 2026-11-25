@@ -71,8 +71,10 @@ def at_receptors(grid: Grid, turbines: list, receptors: list, hub_m: float, lw: 
                  uncertainty_db: float = UNCERTAINTY_DB, alpha: float = ALPHA_500HZ,
                  receiver_height: float = RECEIVER_HEIGHT) -> dict:
     """turbines, receptors: dicts with x, y (local metres) and id / name. Returns a row per receptor and totals.
-    Receptors are worked through in blocks, so that tens of thousands of homes take seconds, not minutes."""
+    lw: the sound power level of every turbine, or one per turbine (quiet modes). Receptors are worked through in
+    blocks, so that tens of thousands of homes take seconds, not minutes."""
     rows = []
+    lw = np.asarray(lw, dtype=float) if np.ndim(lw) else float(lw)
     tx = np.array([t["x"] for t in turbines], dtype=float)
     ty = np.array([t["y"] for t in turbines], dtype=float)
     tz = grid.sample(tx, ty) + hub_m
@@ -96,7 +98,8 @@ def at_receptors(grid: Grid, turbines: list, receptors: list, hub_m: float, lw: 
                          "over_limit_with_uncertainty": bool(round(tot + uncertainty_db, 1) > limit),
                          "lat": rc.get("lat"), "lon": rc.get("lon"), "x": rc["x"], "y": rc["y"]})
     rows.sort(key=lambda r: -r["level_dba"])
-    return {"receptors": rows, "limit_dba": limit, "sound_power_dba": lw, "uncertainty_db": uncertainty_db,
+    return {"receptors": rows, "limit_dba": limit, "uncertainty_db": uncertainty_db,
+            "sound_power_dba": float(lw.max()) if np.ndim(lw) else lw,
             "over_limit": sum(r["over_limit"] for r in rows),
             "over_limit_with_uncertainty": sum(r["over_limit_with_uncertainty"] for r in rows),
             "highest_dba": rows[0]["level_dba"] if rows else None, "n_receptors": len(rows),
@@ -119,3 +122,24 @@ def on_grid(grid: Grid, turbines: list, hub_m: float, lw: float, alpha: float = 
         hm = np.maximum((hub_m + receiver_height) / 2.0, 0.0)
         energy += 10.0 ** (level(lw, d, dp, hub_m, receiver_height, hm, alpha) / 10.0)
     return 10.0 * np.log10(np.maximum(energy, 1e-12))
+
+
+def propagation(grid: Grid, turbines: list, receptors: list, hub_m: float, alpha: float = ALPHA_500HZ,
+                receiver_height: float = RECEIVER_HEIGHT) -> np.ndarray:
+    """[receptor, turbine]: what the path adds to a turbine's sound power level to give its level at the home (a
+    negative number of dB). The same calculation as at_receptors, kept apart so that the turbines' sound power
+    levels can be varied without walking the terrain again."""
+    tx = np.array([t["x"] for t in turbines], dtype=float)
+    ty = np.array([t["y"] for t in turbines], dtype=float)
+    tz = grid.sample(tx, ty) + hub_m
+    out = np.zeros((len(receptors), len(turbines)))
+    block = max(1, int(400_000 // max(len(tx) * PROFILE_POINTS, 1)))
+    for i0 in range(0, len(receptors), block):
+        rx = np.array([rc["x"] for rc in receptors[i0:i0 + block]], dtype=float)[:, None]
+        ry = np.array([rc["y"] for rc in receptors[i0:i0 + block]], dtype=float)[:, None]
+        zr = grid.sample(rx, ry) + receiver_height
+        dp = np.hypot(tx[None, :] - rx, ty[None, :] - ry)
+        d = np.sqrt(dp ** 2 + (tz[None, :] - zr) ** 2)
+        hm = _mean_path_height(grid, tx[None, :], ty[None, :], tz[None, :], rx, ry, zr)
+        out[i0:i0 + block] = level(0.0, d, dp, hub_m, receiver_height, hm, alpha)
+    return out

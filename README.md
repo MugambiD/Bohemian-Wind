@@ -96,7 +96,7 @@ It runs step 1 if new files arrived, records what is new in `intake/status.json`
 
 ## Where each part stands
 
-Honest status of this version (0.3.2-dev). "Working" means it runs end to end and is covered by tests with known answers; it does not mean validated against measurements.
+Honest status of this version (0.3.3-dev). "Working" means it runs end to end and is covered by tests with known answers; it does not mean validated against measurements.
 
 | Capability | State |
 |---|---|
@@ -110,6 +110,9 @@ Honest status of this version (0.3.2-dev). "Working" means it runs end to end an
 | Wake effects and energy yield | **Working,** through [PyWake](https://topfarm.pages.windenergy.dtu.dk/PyWake/) (DTU). Generic turbines by size; no manufacturer curves. |
 | Losses and P50/P90 | **Working with default assumptions** that you can edit. The uncertainty rules were set against measured masts in house, and they are still a developer's budget, not an assessor's. |
 | Shadow flicker and noise | **Working at screening level:** astronomical worst-case flicker; noise after ISO 9613-2 at one frequency. |
+| Expected flicker, flicker budget, quiet modes | **First version, new in 0.3.3-dev.** Expected flicker hours from the wind rose, running time and a sunshine share you enter; the energy cost of keeping homes to a flicker budget; quiet modes that bring homes within the noise level, from mode data you enter. Tested on invented cases with known answers; not yet compared with another program. Set in the project file, not yet on the screens. |
+| Cost of energy | **First version, new in 0.3.3-dev.** A first cost of energy from costs you enter, with cables and roads along the shortest tree; the layout can be fine-tuned for it. A figure for comparing layouts, not a financial model and not a full optimiser. |
+| Use by AI assistants and scripts | **First version, new in 0.3.3-dev.** Every step runs from the command line; each project keeps a provenance record; a connector lets an AI assistant run steps and read results on your computer. No AI takes part in any calculation. See [AI and your data](docs/ai-and-data.md). |
 | Your own exclusion zones and buffers | **Working.** GeoJSON, KML, KMZ or CSV; buffers round zones, along lines and from homes; slope and elevation limits. |
 | Homes | **Working, from open data and your own file.** Buildings from OpenStreetMap and from Microsoft's building footprints are downloaded for the site and merged, and the application says where the two disagree. Your own file of homes (placemarks from Google Earth, for example) goes on top. Every building counts as a home; none of it is a survey. |
 | Permitting support | **Working as a pack** of tables, maps and GIS files. It is not legal advice and replaces no study a permit needs. |
@@ -125,6 +128,8 @@ Honest status of this version (0.3.2-dev). "Working" means it runs end to end an
 | [Windows setup program](docs/windows-installer.md) | What is inside, how it is built and how it is tested |
 | [Windows release checks](docs/release-checks.md) | What a build must pass on a real PC before it is released, and what the last outside review found |
 | [Design rules and roadmap](docs/design.md) | How the interface is meant to work, and what comes next |
+| [AI and your data](docs/ai-and-data.md) | Where an AI assistant may be used, the connector for assistants, and what stays on your computer |
+| [Validation](docs/validation.md) | The public cases with known answers and their results for each version |
 | [Changelog](CHANGELOG.md) | What changed in each version |
 | [Third-party notices](THIRD_PARTY_NOTICES.md) | Components and data sources, with their licences |
 

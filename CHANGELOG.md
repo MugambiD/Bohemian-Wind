@@ -6,6 +6,27 @@ What changed in each version of Bohemian Wind. The format follows [Keep a Change
 
 ## [Unreleased]
 
+## [0.3.3-dev] - 2026-11-25
+
+### Added
+- Shadow flicker, expected case. Beside the astronomical worst case, step 5 now gives the expected hours a year at each home: the rotor stands across the wind of each sector of the wind rose instead of always facing the sun, the turbine runs only between cut-in and cut-out, and the sun shines for the share of daylight you enter (`environment.sunshine_share`: one value or twelve, January first; left empty, the sun is taken to shine all day and the result says so). Sun, wind direction and running are taken as independent. Hills, trees and walls are still ignored.
+- Shadow flicker budget (`environment.flicker_budget_hours`): the expected hours a year a home may have. Where a home is over it, the turbines that shade it are stopped for the share of their shading time that brings it down to the budget, and the energy this costs is reported, with the hours per turbine.
+- Quiet operating modes (`environment.noise_modes`). Enter the turbine's quiet modes as its manufacturer gives them (a sound power level and the energy each yields, as a percentage of the full mode), and step 5 finds which turbines to run in which mode so that every home is within the noise level, and what that costs in energy. No manufacturer data is kept in the program.
+- Cost of energy (`layout.costs`): from a capital cost per MW, a running cost per MW and year, a cost per metre of collector cable and access road, a life and a discount rate, step 4 gives a first cost of energy for the layout. Cables and roads follow the shortest tree linking the turbines and, when given, a connection point. With `layout.objective: cost` the fine-tuning keeps a move only when the cost of energy falls. It is a figure for comparing layouts, not a financial model.
+- A provenance record, `provenance.json`, written into the project after every step: the program and package versions, each step's status, the settings and the marks of the input files it worked from, the methods and the main figures. `bohemian-wind results FOLDER` prints it.
+- A connector for AI assistants: `bohemian-wind mcp` serves five tools over the Model Context Protocol on your own computer (project status, run steps, read results, read the provenance record, make the demo project). The assistant asks for runs and reads results; every figure still comes from the engine. Nothing listens on the network.
+- A public validation set: `bohemian-wind validate` runs eleven invented cases whose answers are known from geometry, from the method's formula written out by hand, or from arithmetic. The results of each version are kept in `docs/validation/`.
+- `docs/ai-and-data.md`: where AI may and may not be used with this program, and what stays on your computer.
+
+### Changed
+- The Word reports, the permitting pack and `flicker_at_homes.csv` carry the expected case, the budget, the quiet modes and the cost of energy when their settings are filled in. A project made before these settings existed is not marked out of date for their sake.
+- The noise calculation takes one sound power level per turbine as well as one for all.
+
+### Not in this version
+- The new settings are entered in the project file (`project.json`), not yet on the screens of the application.
+- CNOSSOS-EU noise: not built. A second noise method must be checked against the published test cases of that method before it is offered, and that check has not been made.
+- The layout is fine-tuned for cost of energy; it is not a full optimiser of the number and position of turbines.
+
 ## [0.3.2-dev] - 2026-11-23
 
 ### Added
@@ -140,7 +161,8 @@ What changed in each version of Bohemian Wind. The format follows [Keep a Change
 
 Before 0.2.0-dev, Bohemian Wind was a stand-alone data-check window (`qc_main.py`, still included). Its history is not in this repository.
 
-[Unreleased]: https://github.com/MugambiD/bohemian-wind/compare/v0.3.2-dev...HEAD
+[Unreleased]: https://github.com/MugambiD/bohemian-wind/compare/v0.3.3-dev...HEAD
+[0.3.3-dev]: https://github.com/MugambiD/bohemian-wind/compare/v0.3.2-dev...v0.3.3-dev
 [0.3.2-dev]: https://github.com/MugambiD/bohemian-wind/compare/v0.3.1-dev...v0.3.2-dev
 [0.3.1-dev]: https://github.com/MugambiD/bohemian-wind/releases/tag/v0.3.1-dev
 [0.3.0-dev]: https://github.com/MugambiD/bohemian-wind/releases/tag/v0.3.0-dev

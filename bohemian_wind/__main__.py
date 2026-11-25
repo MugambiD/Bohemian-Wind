@@ -5,6 +5,9 @@
     python -m bohemian_wind desktop              as an installed program: no console, one copy, its own window (--quit stops it)
     python -m bohemian_wind demo FOLDER          create the demo project in FOLDER and run every step
     python -m bohemian_wind run FOLDER [STEP..]  run steps of a project (default: all six)
+    python -m bohemian_wind results FOLDER       what the project holds, as JSON: status and main figures of every step
+    python -m bohemian_wind mcp                  serve the project tools to an AI assistant on this computer (see mcp.py)
+    python -m bohemian_wind validate             run the validation cases with known answers and print the table
     python -m bohemian_wind check FOLDER         daily intake, once: re-run step 1 if new logger files arrived
     python -m bohemian_wind watch FOLDER         daily intake, continuously (every --minutes, default 60)
     python -m bohemian_wind qc DATA_FOLDER ...   the data checks alone, on a folder of logger files (see: qc --help)
@@ -18,7 +21,7 @@ import sys
 
 from . import APP_NOTICE, __version__
 
-COMMANDS = ("app", "desktop", "demo", "run", "check", "watch", "qc")
+COMMANDS = ("app", "desktop", "demo", "run", "results", "mcp", "validate", "check", "watch", "qc")
 
 
 def main(argv=None) -> int:
@@ -33,6 +36,12 @@ def main(argv=None) -> int:
     if argv[0] == "desktop":
         from .app.desktop import main as desktop_main
         return desktop_main(argv[1:])
+    if argv[0] == "mcp":
+        from .mcp import main as mcp_main
+        return mcp_main()
+    if argv[0] == "validate":
+        from .validation import main as validation_main
+        return validation_main(argv[1:])
     ap = argparse.ArgumentParser(prog="bohemian-wind", description=f"Bohemian Wind v{__version__}. {APP_NOTICE}")
     sub = ap.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("app", help="open the application")
@@ -44,6 +53,8 @@ def main(argv=None) -> int:
     r = sub.add_parser("run", help="run steps of a project")
     r.add_argument("folder")
     r.add_argument("steps", nargs="*")
+    o = sub.add_parser("results", help="status and main figures of every step, as JSON")
+    o.add_argument("folder")
     c = sub.add_parser("check", help="daily intake, once")
     c.add_argument("folder")
     c.add_argument("--force", action="store_true", help="run the checks even if no file changed")
@@ -76,6 +87,11 @@ def main(argv=None) -> int:
             for step in (args.steps or STEPS):
                 say(f"--- {step} ---")
                 project.run(step, log=say)
+            return 0
+        if args.cmd == "results":
+            import json
+            from . import provenance
+            print(json.dumps(provenance.record(project), indent=1, default=str))
             return 0
         from .intake import watch
         if args.cmd == "check":

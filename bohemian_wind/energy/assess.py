@@ -25,6 +25,7 @@ import numpy as np
 from .. import climate as _climate
 from ..flow.fields import WindField
 from . import EnergyError, budget, placement, wakes
+from . import cost as _cost
 from .turbine import RHO_SCALE_HEIGHT, Turbine, generic_model
 
 S_GRID = np.arange(0.30, 2.0001, 0.002)
@@ -87,13 +88,18 @@ def design(field: WindField, clim: dict, mask: np.ndarray, turbine: Turbine, n_t
            refine: bool = True, refine_seconds: float = 90.0, losses=None, speed_uncertainty: dict | None = None,
            energy_uncertainty: dict | None = None, iav_speed: float = budget.DEFAULT_IAV_SPEED,
            fixed_xy=None, mast_xy=(0.0, 0.0), top_m: float | None = None, profile_clean: bool = True,
-           long_term: dict | None = None, log=lambda m: None) -> dict:
+           long_term: dict | None = None, costs=None, objective: str = "energy", log=lambda m: None) -> dict:
     """field: wind field at the hub height (bohemian_wind.flow.fields.wind_field with the same climate, factor and
     shear). mask: buildable cells. fixed_xy: (x, y) arrays to evaluate a given layout instead of designing one.
     top_m: height of the top anemometer (default: the climate's height), for the vertical extrapolation term.
     profile_clean: False when the measured wind profile is not clean (climate's shear warning): the vertical term
     grows faster with height. long_term: {"pct", "corrected", "basis"} from budget.long_term_pct for the campaign
-    (None: the default long-term terms)."""
+    (None: the default long-term terms). costs: energy.cost.Costs, for a cost of energy; with objective "cost" the
+    fine-tuning keeps a move only when the cost of energy falls (objective "energy": when the energy rises)."""
+    if objective not in ("energy", "cost"):
+        raise EnergyError(f"Unknown objective '{objective}': choose energy or cost.")
+    if objective == "cost" and costs is None:
+        raise EnergyError("To fine-tune the layout for cost of energy, enter the costs first (capital cost per MW at least).")
     if abs(field.height_m - turbine.hub_m) > 0.5:
         raise EnergyError(f"The wind field is at {field.height_m:g} m but the hub height is {turbine.hub_m:g} m.")
     if wake not in wakes.WAKE_MODELS:
@@ -150,8 +156,15 @@ def design(field: WindField, clim: dict, mask: np.ndarray, turbine: Turbine, n_t
             f"energy from {theta:.0f} deg).")
         if refine and len(idx) > 1:
             t0 = time.time()
+            score = None
+            if objective == "cost":                       # energy per unit of yearly cost: the inverse of the cost of energy
+                mw = turbine.rated_kw / 1000.0
+
+                def score(xs, ys, net_sum):
+                    return 1.0 / _cost.of_layout(costs, mw * len(xs), xs, ys, net_sum * other)["cost_of_energy_per_mwh"]
             idx, refinement = _refine(cx, cy, value, idx, turbine.rotor_m, theta, cross_d, along_d, link_m, run,
-                                      deadline=t0 + refine_seconds, log=log)
+                                      deadline=t0 + refine_seconds, log=log, score=score)
+            refinement["objective"] = objective
             refinement["seconds"] = round(time.time() - t0, 1)
         order = np.lexsort((cx[idx], -cy[idx]))          # north to south, then west to east
         idx = idx[order]
@@ -257,24 +270,35 @@ def design(field: WindField, clim: dict, mask: np.ndarray, turbine: Turbine, n_t
         "spacing": {"cross_d": cross_d, "along_d": along_d, "link_m": link_m,
                     "closest_pair_d": placement.min_spacing_d(x, y, turbine.rotor_m)},
         "mast_mean_ws": field.mast_mean_ws, "mean_free_ws": float(np.mean(free_ws)), "refinement": refinement,
-        "engine": field.engine, "notes": notes, "cautions": cautions, "hours_per_year": wakes.HOURS})
+        "engine": field.engine, "notes": notes, "cautions": cautions, "hours_per_year": wakes.HOURS,
+        "objective": objective})
+    if costs is not None:
+        res["cost"] = _cost.of_layout(costs, rated_mw, x, y, res["p50_gwh"] * 1000.0)
     return res
 
 
 def _refine(cx, cy, value, idx, d, theta, cross_d, along_d, link_m, run, deadline, log, n_alt=12, worst=4,
-            max_pass=2) -> tuple:
+            max_pass=2, score=None) -> tuple:
     """Wake-aware swaps. The most-waked turbines are tried on the best free cells that keep the spacing and link
     rules; candidates are screened with the fast Jensen model and a move is kept only if the wind farm total
-    under the chosen wake model improves."""
+    under the chosen wake model improves. score(x, y, net energy): what a move must raise (default: the energy
+    itself); with a score, every turbine is tried, not only the most-waked ones, since a move can pay through
+    shorter cables alone."""
+    what = "energy" if score is None else "energy per unit of cost"
+    if score is None:
+        score = lambda xs, ys, net_sum: net_sum  # noqa: E731
+    else:
+        worst = len(idx)
     cur = [int(i) for i in idx]
     g, n = run(cx[cur], cy[cur])
-    start = total = float(n.sum())
+    start = total = float(score(cx[cur], cy[cur], n.sum()))
+    free_choice = what != "energy"
     moves = []
     for _ in range(max_pass):
         improved = False
         wl = 1 - n / g
         for j in np.argsort(-wl)[:worst]:
-            if wl[j] < 0.02 or time.time() > deadline:
+            if (wl[j] < 0.02 and not free_choice) or time.time() > deadline:
                 continue
             others = [cur[m] for m in range(len(cur)) if m != j]
             ok = np.isfinite(value)
@@ -287,9 +311,13 @@ def _refine(cx, cy, value, idx, d, theta, cross_d, along_d, link_m, run, deadlin
             if link_m:
                 ok &= near
             alts = np.flatnonzero(ok)
-            alts = alts[np.argsort(-value[alts])][:n_alt]
+            if free_choice and len(others):                      # half by energy, half by nearness to the others
+                gap = np.min(np.hypot(cx[alts, None] - cx[others][None, :], cy[alts, None] - cy[others][None, :]), axis=1)
+                alts = np.unique(np.concatenate([alts[np.argsort(-value[alts])][:n_alt // 2], alts[np.argsort(gap)][:n_alt // 2]]))
+            else:
+                alts = alts[np.argsort(-value[alts])][:n_alt]
             _, nj = run(cx[cur], cy[cur], model="jensen075")
-            base_j, best = float(nj.sum()), None
+            base_j, best = float(score(cx[cur], cy[cur], nj.sum())), None
             for alt in alts:
                 if time.time() > deadline:
                     break
@@ -298,20 +326,22 @@ def _refine(cx, cy, value, idx, d, theta, cross_d, along_d, link_m, run, deadlin
                 if not placement.connected_set(cx[trial], cy[trial], link_m):
                     continue
                 _, nt = run(cx[trial], cy[trial], model="jensen075")
-                if nt.sum() > base_j * 1.001 and (best is None or nt.sum() > best[1]):
-                    best = (int(alt), float(nt.sum()))
+                st = float(score(cx[trial], cy[trial], nt.sum()))
+                if st > base_j * 1.001 and (best is None or st > best[1]):
+                    best = (int(alt), st)
             if best is not None:
                 trial = cur.copy()
                 trial[j] = best[0]
                 g2, n2 = run(cx[trial], cy[trial])
-                if n2.sum() > total * 1.0005:
+                s2 = float(score(cx[trial], cy[trial], n2.sum()))
+                if s2 > total * 1.0005:
                     moves.append({"from_xy": [float(cx[cur[j]]), float(cy[cur[j]])],
                                   "to_xy": [float(cx[best[0]]), float(cy[best[0]])],
-                                  "gain_pct": float(100 * (n2.sum() / total - 1))})
-                    cur, g, n, total = trial, g2, n2, float(n2.sum())
+                                  "gain_pct": float(100 * (s2 / total - 1))})
+                    cur, g, n, total = trial, g2, n2, s2
                     improved = True
         if not improved or time.time() > deadline:
             break
     if moves:
-        log(f"Fine-tuning moved {len(moves)} turbine{'s' if len(moves) != 1 else ''}: +{100 * (total / start - 1):.2f} % energy.")
+        log(f"Fine-tuning moved {len(moves)} turbine{'s' if len(moves) != 1 else ''}: +{100 * (total / start - 1):.2f} % {what}.")
     return np.array(cur, dtype=int), {"moves": moves, "gain_pct": float(100 * (total / start - 1))}

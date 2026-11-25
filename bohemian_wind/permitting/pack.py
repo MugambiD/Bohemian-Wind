@@ -249,6 +249,12 @@ Method: {_e(nz['method'])}.</p>""")
 {fl['limit_min_day']:g} minutes a day in the astronomical worst case (sun always shining, rotor always turning and facing the
 sun, nothing in between). Real flicker is a fraction of this. Stopping turbines whenever a home could be affected would cost at most
 {fl['shutdown_upper_bound_pct']:.2f} % of operating time. Method: {_e(fl['method'])}.</p>""")
+        if fl.get("expected"):
+            ex, bud = fl["expected"], fl.get("budget")
+            sec.append(f"<p>Expected case: at most {ex['highest_hours']:.0f} hours a year at a home. {_e(ex['method'][0].upper() + ex['method'][1:])}."
+                       + (f" With a budget of {bud['hours']:g} expected hours a year per home, {bud['homes_over']:,} homes are over it; "
+                          f"stopping the turbines as far as needed would cost {bud['shutdown_loss_pct']:.2f} % of the energy." if bud else "")
+                       + "</p>")
         if (out_dir / "map_shadow_flicker.png").is_file():
             sec.append("<img class='map' src='map_shadow_flicker.png' alt='Shadow flicker map'>")
         shown = [r for r in fl["receptors"] if r["hours_per_year"] > 0][:25]
