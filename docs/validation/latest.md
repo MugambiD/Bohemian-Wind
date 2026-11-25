@@ -1,4 +1,4 @@
-# Validation cases: results of version 0.3.3-dev
+# Validation cases: results of version 0.3.4-dev
 
 Written by `bohemian-wind validate --write docs/validation`. What the cases are and what they do not show: [validation.md](../validation.md).
 

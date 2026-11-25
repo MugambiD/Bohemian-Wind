@@ -17,7 +17,7 @@ Open-source software for the wind developer's workflow, built for projects in Ea
 </p>
 
 <p align="center">
-  <a href="https://github.com/MugambiD/bohemian-wind/releases/tag/v0.3.3-dev"><img alt="Download for Windows (0.3.3-dev)" src="https://img.shields.io/badge/Download_for_Windows-0.3.3--dev-008781?style=for-the-badge&logo=windows&logoColor=white" height="44"></a>
+  <a href="https://github.com/MugambiD/bohemian-wind/releases/tag/v0.3.4-dev"><img alt="Download for Windows (0.3.4-dev)" src="https://img.shields.io/badge/Download_for_Windows-0.3.4--dev-008781?style=for-the-badge&logo=windows&logoColor=white" height="44"></a>
 </p>
 <p align="center">Free. No account. Runs on your own computer; your measurements never leave it.<br>
 <a href="docs/media/bohemian-wind-demo.mp4">Watch the 2-minute demo</a> |
@@ -96,7 +96,7 @@ It runs step 1 if new files arrived, records what is new in `intake/status.json`
 
 ## Where each part stands
 
-Honest status of this version (0.3.3-dev). "Working" means it runs end to end and is covered by tests with known answers; it does not mean validated against measurements.
+Honest status of this version (0.3.4-dev). "Working" means it runs end to end and is covered by tests with known answers; it does not mean validated against measurements.
 
 | Capability | State |
 |---|---|

@@ -6,9 +6,14 @@ What changed in each version of Bohemian Wind. The format follows [Keep a Change
 
 ## [Unreleased]
 
+## [0.3.4-dev] - 2026-11-25
+
 ### Fixed
 - The wind-rose file of a summary-tables project: a direction outside 0 to 360 degrees is no longer taken modulo 360 and used. A missing-value code such as -999 was read as 81 degrees, so a file with no usable direction gave a tidy one-sector rose. Such readings are now left out and counted (360 is north); a file with none left is refused, and a file with too few left says how many were left out. Found by an outside review of 0.3.3-dev.
 - The same file, with readings finer than hourly: every reading now keeps its own direction and weighs one over the number of readings in its hour. Before, each hour got the bearing of its mean wind vector, so an hour of north wind then south wind came out as east. A wind given as components with no speed has no direction and is left out of the rose.
+
+### Who should run a project again
+This is a corrective release for 0.3.3-dev. If you have a summary-tables project whose wind-rose file (the `direction` file) holds directions outside 0 to 360 degrees, such as a missing-value code of -999, or readings finer than hourly in which the wind turns within the hour, run step 1 again with this version: the wind rose may change. If that rose fed expected shadow flicker or a flicker budget, run step 5 again as well and write the reports again. The mean wind speed alone does not show whether the rose changed. Projects from logger files are not affected.
 
 ## [0.3.3-dev] - 2026-11-25
 
@@ -165,7 +170,8 @@ What changed in each version of Bohemian Wind. The format follows [Keep a Change
 
 Before 0.2.0-dev, Bohemian Wind was a stand-alone data-check window (`qc_main.py`, still included). Its history is not in this repository.
 
-[Unreleased]: https://github.com/MugambiD/bohemian-wind/compare/v0.3.3-dev...HEAD
+[Unreleased]: https://github.com/MugambiD/bohemian-wind/compare/v0.3.4-dev...HEAD
+[0.3.4-dev]: https://github.com/MugambiD/bohemian-wind/compare/v0.3.3-dev...v0.3.4-dev
 [0.3.3-dev]: https://github.com/MugambiD/bohemian-wind/compare/v0.3.2-dev...v0.3.3-dev
 [0.3.2-dev]: https://github.com/MugambiD/bohemian-wind/compare/v0.3.1-dev...v0.3.2-dev
 [0.3.1-dev]: https://github.com/MugambiD/bohemian-wind/releases/tag/v0.3.1-dev
