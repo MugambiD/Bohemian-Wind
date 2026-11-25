@@ -6,6 +6,10 @@ What changed in each version of Bohemian Wind. The format follows [Keep a Change
 
 ## [Unreleased]
 
+### Fixed
+- The wind-rose file of a summary-tables project: a direction outside 0 to 360 degrees is no longer taken modulo 360 and used. A missing-value code such as -999 was read as 81 degrees, so a file with no usable direction gave a tidy one-sector rose. Such readings are now left out and counted (360 is north); a file with none left is refused, and a file with too few left says how many were left out. Found by an outside review of 0.3.3-dev.
+- The same file, with readings finer than hourly: every reading now keeps its own direction and weighs one over the number of readings in its hour. Before, each hour got the bearing of its mean wind vector, so an hour of north wind then south wind came out as east. A wind given as components with no speed has no direction and is left out of the rose.
+
 ## [0.3.3-dev] - 2026-11-25
 
 ### Added

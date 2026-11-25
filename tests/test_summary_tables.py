@@ -161,7 +161,7 @@ def test_the_rose_file_is_one_table_and_a_year_of_hours_by_the_clock(tmp_path):
     with zipfile.ZipFile(tmp_path / "one.zip", "w") as z:
         z.write(east, east.name)
     one = summary.read_directions(tmp_path / "one.zip")                 # an archive with one table still loads
-    assert len(one) == 8760 and one["ws"].mean() == pytest.approx(4.0) and one["wd"].iloc[0] == pytest.approx(90.0)
+    assert one.attrs["hours"] == 8760 and one["ws"].mean() == pytest.approx(4.0) and one["wd"].iloc[0] == pytest.approx(90.0)
 
     with pytest.raises(summary.SummaryError, match="146 different hours"):                            # six days of minutes
         summary.read_directions(_rose(tmp_path / "minutes.csv", pd.date_range("2025-01-01", periods=8760, freq="min")))
@@ -172,16 +172,17 @@ def test_the_rose_file_is_one_table_and_a_year_of_hours_by_the_clock(tmp_path):
     three = pd.date_range("2023-01-01", "2025-12-31 23:00", freq="h")
     with pytest.raises(summary.SummaryError, match="has gaps"):                                        # a year of hours spread over three
         summary.read_directions(_rose(tmp_path / "gapped.csv", three[::3]))
-    assert len(summary.read_directions(_rose(tmp_path / "hourly.csv", year))) == 8760
+    assert summary.read_directions(_rose(tmp_path / "hourly.csv", year)).attrs["hours"] == 8760
     ten = pd.date_range("2025-01-01", periods=8760 * 6, freq="10min")                                  # ten-minute values: six to the hour
     sub = summary.read_directions(_rose(tmp_path / "ten.csv", ten, np.tile([2.0, 4.0, 6.0, 8.0, 10.0, 12.0], 8760), 90.0))
-    assert len(sub) == 8760 and sub["ws"].to_numpy() == pytest.approx(7.0) and sub["wd"].to_numpy() == pytest.approx(90.0)
+    assert sub.attrs["hours"] == 8760 and sub["w"].sum() == pytest.approx(8760.0) and sub["w"].to_numpy() == pytest.approx(1 / 6)
+    assert (sub["ws"] * sub["w"]).sum() / sub["w"].sum() == pytest.approx(7.0) and sub["wd"].to_numpy() == pytest.approx(90.0)
     # every hour counts once, however often it was sampled: a second year at ten minutes does not outweigh an hourly first
     mixed = pd.concat([pd.DataFrame({"time": year, "ws": 6.0, "wd": 90.0}),
                        pd.DataFrame({"time": pd.date_range("2026-01-01", periods=8760 * 6, freq="10min"), "ws": 6.0, "wd": 270.0})])
     mixed.to_csv(tmp_path / "mixed.csv", index=False)
     m = summary.read_directions(tmp_path / "mixed.csv")
-    assert (m["wd"].round() == 90).mean() == pytest.approx(0.5)
+    assert m["w"][m["wd"].round() == 90].sum() / m["w"].sum() == pytest.approx(0.5)
 
 
 def test_a_repeated_row_is_one_record_and_two_winds_at_one_time_are_refused_in_both_readers(tmp_path):
@@ -194,7 +195,7 @@ def test_a_repeated_row_is_one_record_and_two_winds_at_one_time_are_refused_in_b
     for frame, name in ((uv, "uv"), (sd, "sd")):
         twice = tmp_path / f"{name}-twice.csv"
         pd.concat([frame, frame]).to_csv(twice, index=False)                                   # exact repeats: one record each
-        assert len(summary.read_directions(twice)) == len(t)
+        assert summary.read_directions(twice).attrs["hours"] == len(t) and len(summary.read_directions(twice)) == len(t)
         if name == "uv":
             assert longterm.read_reference_file(twice)[0].mean() == pytest.approx(5.0)
     turned = uv.assign(u100=3.0, v100=-4.0)                                                    # the same speed from the opposite side
@@ -208,3 +209,45 @@ def test_a_repeated_row_is_one_record_and_two_winds_at_one_time_are_refused_in_b
     pd.concat([sd, sd.assign(wd=270.0)]).to_csv(clash2, index=False)                           # the same speed, another direction
     with pytest.raises(summary.SummaryError, match="more than once with different wind"):
         summary.read_directions(clash2)
+
+
+def test_a_missing_direction_is_not_a_bearing_and_a_turning_wind_gets_no_invented_one(tmp_path):
+    """Outside review of 0.3.3-dev (25 Nov 2026). A year of directions of -999 was read as 81 degrees (the code taken
+    modulo 360), and an hour of north wind then south wind came out as east (the bearing of a mean vector of nothing)."""
+    year = pd.date_range("2025-01-01", periods=8760, freq="h")
+    for code in (-999.0, 9999.0, 360.5, -0.5):
+        with pytest.raises(summary.SummaryError, match="holds no usable wind direction"):
+            summary.read_directions(_rose(tmp_path / "coded.csv", year, 6.0, code))
+    two = pd.date_range("2024-01-01", periods=2 * 8784, freq="h")                       # two years, 500 hours without a direction
+    wd = np.full(len(two), 90.0)
+    wd[1000:1500] = -999.0
+    wd[2000:2010] = 360.0                                                               # 360 is north, and a direction
+    mixed = summary.read_directions(_rose(tmp_path / "mixed.csv", two, 6.0, wd))
+    assert mixed.attrs["unusable"] == 500 and mixed.attrs["records"] == len(two) and mixed.attrs["hours"] == len(two) - 500
+    assert (mixed["wd"] == 0.0).sum() == 10 and mixed["wd"].between(0, 359.999).all()
+    wd[:9000] = -999.0                                                                  # too few left: refused, and it says how many
+    with pytest.raises(summary.SummaryError, match=r"9,000 of its 17,568 records have no usable direction"):
+        summary.read_directions(_rose(tmp_path / "few.csv", two, 6.0, wd))
+    # north for half of every hour, south for the other half: half the time in each, none from the east
+    half = pd.date_range("2025-01-01", periods=2 * 8760, freq="30min")
+    as_bearing = _rose(tmp_path / "ns.csv", half, 6.0, np.tile([0.0, 180.0], 8760))
+    as_vector = tmp_path / "ns_uv.csv"
+    pd.DataFrame({"time": half, "u100": 0.0, "v100": np.tile([-6.0, 6.0], 8760)}).to_csv(as_vector, index=False)
+    for f in (as_bearing, as_vector):
+        r = summary.read_directions(f)
+        share = r["w"].groupby(r["wd"].round()).sum() / r["w"].sum()
+        assert share.to_dict() == pytest.approx({0.0: 0.5, 180.0: 0.5}) and r.attrs["hours"] == 8760
+        assert (r["ws"] * r["w"]).sum() / r["w"].sum() == pytest.approx(6.0)
+    calm = tmp_path / "calm.csv"                                                         # no wind as components: no direction
+    pd.DataFrame({"time": year, "u100": 0.0, "v100": 0.0}).to_csv(calm, index=False)
+    with pytest.raises(summary.SummaryError, match="holds no usable wind direction"):
+        summary.read_directions(calm)
+    # through step 1: the rose of the turning wind has north and south and nothing between, and the note counts what was left out
+    d = _spec(tmp_path / "p", direction=True)
+    spec = json.loads((d / summary.NAME).read_text())
+    name = spec["direction"]["file"]
+    as_bearing.replace(d / name) if name.endswith(".csv") else None
+    out = intake.run_checks(d, tmp_path / "out", log=lambda m: None)
+    c = climate.load(out["climate"])
+    by = {round(s["centre"]): s["freq"] for s in c["sectors"]}
+    assert by[0] == pytest.approx(0.5) and by[180] == pytest.approx(0.5) and by[90] == 0.0

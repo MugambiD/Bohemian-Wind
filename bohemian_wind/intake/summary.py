@@ -116,14 +116,18 @@ def _momm(months: dict, h: float, min_share: float = _climate.MIN_MONTH_SHARE) -
 
 
 ROSE_HOURS = 24 * 365          # hours of wind a rose needs: a year, so that every season is in it
+CALM_MS = 0.05                 # below this a wind given as components has no direction
 ROSE_COVERAGE = 0.90           # share of the hours between the first and the last that must be there
 
 
 def read_directions(path) -> pd.DataFrame:
-    """Reference wind for the rose, hour by hour: columns ws (m/s) and wd (degrees the wind comes from), indexed by
-    the hour. Reads a CSV, or a zip holding one CSV, with a time column and either u/v components or a speed and a
-    direction, hourly or finer. Finer values are averaged into their hour, so every hour counts once however often
-    it was sampled. At least a year of hours is needed, without long gaps."""
+    """Reference wind for the rose: one row per reading with ws (m/s), wd (degrees the wind comes from, 0 to below 360)
+    and w, its weight: one over the number of readings in its hour, so that every hour counts once however often it
+    was sampled and every reading keeps its own direction. Reads a CSV, or a zip holding one CSV, with a time column
+    and either u/v components or a speed and a direction, hourly or finer. A direction outside 0 to 360 degrees is
+    not a direction (360 is north) and its reading is left out and counted; so is a reading with no wind when the
+    wind is given as components. At least a year of hours with a direction is needed, without long gaps. The frame's
+    attrs say how many hours and records there were and how many were left out."""
     from ..longterm import (PAIR_NAMES, TIME_NAMES, checked_speed, checked_speed_or_component, one_location,  # noqa: PLC0415
                             one_record_per_time, parsed_times)
     path = Path(path)
@@ -162,27 +166,47 @@ def read_directions(path) -> pd.DataFrame:
             v = checked_speed_or_component(df[pair[1]], path.name, f"component {pair[1]}")
             checked_speed(np.hypot(u, v), path.name, "wind speed")
             rec = one_record_per_time(pd.DataFrame({"u": u, "v": v}, index=when), path.name)
+            ws = np.hypot(rec["u"].to_numpy(), rec["v"].to_numpy())
+            wd = np.degrees(np.arctan2(-rec["u"].to_numpy(), -rec["v"].to_numpy())) % 360.0
+            wd[ws < CALM_MS] = np.nan                        # no wind, no direction: the bearing of a zero vector means nothing
+            rec = pd.DataFrame({"ws": ws, "wd": wd}, index=rec.index)
         else:
             ws = checked_speed(pd.to_numeric(df[sp], errors="coerce"), path.name, f"wind speed column {sp}")
-            wd = np.asarray(pd.to_numeric(df[d], errors="coerce"), dtype=float) % 360.0
-            rec = one_record_per_time(pd.DataFrame({"ws": ws, "wd": wd}, index=when), path.name)
-            rad = np.radians(rec["wd"].to_numpy())
-            rec = pd.DataFrame({"u": -rec["ws"].to_numpy() * np.sin(rad), "v": -rec["ws"].to_numpy() * np.cos(rad)}, index=rec.index)
+            wd = np.array(pd.to_numeric(df[d], errors="coerce"), dtype=float)
+            wd[~((wd >= 0.0) & (wd <= 360.0))] = np.nan      # the bearing as it stands: a missing-value code (-999, 9999) is not a direction
+            wd[wd == 360.0] = 0.0                            # 360 is north
+            both = pd.DataFrame({"ws": ws, "wd": wd}, index=when)
+            both = both[both["ws"].notna()]
+            both["wd"] = both["wd"].fillna(-1.0)             # kept through the check for repeated rows, then taken out again
+            rec = one_record_per_time(both, path.name)
+            rec["wd"] = rec["wd"].where(rec["wd"] >= 0.0)
     except ValueError as e:
         raise SummaryError(f"The direction file cannot be used: {e}.") from e
-    # every hour once: the speed is the mean of the hour's speeds, the direction that of the hour's mean wind vector
-    rec["ws"] = np.hypot(rec["u"].to_numpy(), rec["v"].to_numpy())
-    hour = rec.groupby(rec.index.floor("h")).mean()
-    out = pd.DataFrame({"ws": hour["ws"], "wd": np.degrees(np.arctan2(-hour["u"], -hour["v"])) % 360.0}).dropna()
-    if len(out) < ROSE_HOURS:
-        span = f", from {out.index[0]:%d %b %Y %H:%M} to {out.index[-1]:%d %b %Y %H:%M}" if len(out) else ""
-        raise SummaryError(f"The direction file {path.name} holds wind for {len(out):,} different hours{span} "
-                           f"({len(rec):,} records): at least a year of hours ({ROSE_HOURS:,}) is needed for a rose.")
-    between = int((out.index[-1] - out.index[0]) / pd.Timedelta(hours=1)) + 1
-    if len(out) < ROSE_COVERAGE * between:
-        raise SummaryError(f"The direction file {path.name} has gaps: wind for {len(out):,} of the {between:,} hours between "
-                           f"{out.index[0]:%d %b %Y} and {out.index[-1]:%d %b %Y} ({100 * len(out) / between:.0f} %). "
-                           f"A rose needs hourly wind for at least {100 * ROSE_COVERAGE:.0f} % of its period.")
+    records = len(rec)
+    out = rec.dropna()
+    unusable = records - len(out)
+    left = (f" {unusable:,} of its {records:,} records have no usable direction (outside 0 to 360 degrees, missing, or no wind) "
+            "and were left out.") if unusable else ""
+    if not len(out):
+        raise SummaryError(f"The direction file {path.name} holds no usable wind direction: all {records:,} records have a "
+                           "direction outside 0 to 360 degrees, a missing one, or no wind. Check the direction column and its "
+                           "missing-value code.")
+    # every hour counts once, and every reading keeps its own direction: a reading weighs one over the number of readings
+    # in its hour. (One direction per hour from the mean wind vector would invent a bearing when the wind turns within the
+    # hour: north and south in equal parts would come out as east.)
+    hour = out.index.floor("h")
+    out = out.assign(w=1.0 / pd.Series(hour, index=out.index).groupby(hour).transform("size").to_numpy())
+    first, last, hours = hour.min(), hour.max(), int(hour.nunique())
+    if hours < ROSE_HOURS:
+        raise SummaryError(f"The direction file {path.name} holds wind with a direction for {hours:,} different hours, from "
+                           f"{first:%d %b %Y %H:%M} to {last:%d %b %Y %H:%M} ({records:,} records): at least a year of hours "
+                           f"({ROSE_HOURS:,}) is needed for a rose.{left}")
+    between = int((last - first) / pd.Timedelta(hours=1)) + 1
+    if hours < ROSE_COVERAGE * between:
+        raise SummaryError(f"The direction file {path.name} has gaps: wind with a direction for {hours:,} of the {between:,} hours "
+                           f"between {first:%d %b %Y} and {last:%d %b %Y} ({100 * hours / between:.0f} %). "
+                           f"A rose needs hourly wind for at least {100 * ROSE_COVERAGE:.0f} % of its period.{left}")
+    out.attrs.update(hours=hours, records=records, unusable=unusable, first=first, last=last)
     return out
 
 
@@ -232,18 +256,22 @@ def build_climate(spec: dict, n_sectors: int = 12) -> dict:
     if dspec.get("file"):
         ref = read_directions(spec["_path"].parent / str(dspec["file"]))
         sec = (np.floor(((ref["wd"].to_numpy() + width / 2) % 360) / width)).astype(int)
-        ws = ref["ws"].to_numpy()
-        overall = float(ws.mean())
-        freq = np.array([(sec == i).mean() for i in range(n_sectors)])
-        ratio = np.array([ws[sec == i].mean() / overall if (sec == i).sum() >= MIN_SECTOR_HOURS else 1.0 for i in range(n_sectors)])
+        ws, wt = ref["ws"].to_numpy(), ref["w"].to_numpy()             # weights: every hour once
+        overall = float((ws * wt).sum() / wt.sum())
+        in_sec = [float(wt[sec == i].sum()) for i in range(n_sectors)]  # hours in each sector
+        freq = np.array(in_sec) / float(wt.sum())
+        ratio = np.array([float((ws * wt)[sec == i].sum() / in_sec[i]) / overall if in_sec[i] >= MIN_SECTOR_HOURS else 1.0
+                          for i in range(n_sectors)])
         ratio = ratio / float((freq * ratio).sum())
         k_sec = sector_shape(freq, ratio, k_all)
         for i in range(n_sectors):
             m = mean_top * ratio[i]
             sectors.append({"centre": i * width, "freq": float(freq[i]), "A": float(m / _gamma(1 + 1 / k_sec)), "k": float(k_sec),
-                            "mean": float(m), "records": 0, "reference_records": int((sec == i).sum())})
+                            "mean": float(m), "records": 0, "reference_records": int(round(in_sec[i]))})
         no_direction = False
-        dir_note = str(dspec.get("what") or "reference series") + f" ({len(ref):,} hours, {ref.index[0]:%b %Y} to {ref.index[-1]:%b %Y})"
+        dir_note = str(dspec.get("what") or "reference series") + (f" ({ref.attrs['hours']:,} hours, {ref.attrs['first']:%b %Y} to {ref.attrs['last']:%b %Y}"
+                                                                         + (f"; {ref.attrs['unusable']:,} of {ref.attrs['records']:,} records had no usable "
+                                                                            "direction and were left out" if ref.attrs["unusable"] else "") + ")")
     else:
         for i in range(n_sectors):
             sectors.append({"centre": i * width, "freq": 1.0 / n_sectors, "A": A_all, "k": k_all, "mean": mean_top, "records": 0})
