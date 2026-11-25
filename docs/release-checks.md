@@ -72,3 +72,8 @@ with the controls the retest asked for (`tests/test_summary_tables.py`).
 0.3.2-dev was published as a preview on 23 November 2026 with these fixes, and 0.3.3-dev and 0.3.4-dev on 25 November 2026. Checks 1 to 10 above had not yet been
 made on a real PC at that date, and the setup program that rolled back on 21 November is not yet explained: both
 stay open, and their results are to be written here when they are in.
+
+**The setup that failed on 21 November.** The likeliest cause, not proven: a CFD run had been started one minute
+before setup, and its solver programs, which belong to the installed copy, were open. Setup could not replace them
+and was ended at its "file in use" question (exit code 5). From 0.3.5-dev setup checks for a running solver first
+and stops with the reason before changing anything. A fresh attempt with no CFD running is still to be recorded.

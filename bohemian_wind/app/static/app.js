@@ -52,6 +52,7 @@
   const ok = v => v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v));
   const num = (v, d = 1) => ok(v) ? Number(v).toLocaleString('en-GB', { minimumFractionDigits: d, maximumFractionDigits: d }) : '–';
   const get = (o, path) => path.split('.').reduce((a, k) => (a == null ? a : a[k]), o);
+  let laySet = null;
   const setPath = (o, path, v) => { const ks = path.split('.'); let a = o; ks.slice(0, -1).forEach(k => { a = a[k] = a[k] || {}; }); a[ks[ks.length - 1]] = v; return o; };
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const day = s => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || '')); return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1]}` : '–'; };
@@ -114,6 +115,56 @@
   function fSelect(section, key, label, options, o = {}) {
     const v = get(S.project[section], key), id = 'f' + (++uid);
     return `<div class="field"><label for="${id}">${label}</label><select id="${id}" data-s="${section}" data-k="${key}"${o.rerender ? ' data-rerender="1"' : ''}>${options.map(([val, text]) => `<option value="${esc(val)}"${String(val) === String(v) ? ' selected' : ''}>${esc(text)}</option>`).join('')}</select>${o.help ? `<small>${o.help}</small>` : ''}</div>`;
+  }
+
+  function layoutsCard() {
+    const LY = S.project.layouts || { kept: [], sets: [], compare: null }, L = S.project.layout;
+    const lay = stepOf('layout'), done = lay && lay.status === 'done';
+    const used = LY.sets.find(x => x.in_use);
+    const opt = (list, sel) => list.map(x => `<option value="${esc(x.key || x.name)}"${(x.key || x.name) === sel ? ' selected' : ''}>${esc(x.name)}</option>`).join('');
+    const drafts = LY.sets;
+    const rows = LY.kept.map(k => [`${esc(k.name)}${k.screened ? '' : ' <small>(kept without step 5)</small>'}<br><button class="btn" type="button" data-lay="use" data-name="${esc(k.name)}">Use its positions</button>`, num(k.turbines, 0), num(k.p50_gwh, 1)]);
+    const c = LY.compare;
+    const cmp = c ? `<div class="compare"><p class="note"><strong>${esc(c.headline)}</strong></p>
+        ${(c.warnings || []).map(w => `<p class="note">${ICON.warn}${esc(w)}</p>`).join('')}
+        ${table(['', esc(c.a), esc(c.b), 'Change', 'Change, %'], Object.entries(c.rows).map(([k, r]) => [esc(k), num(r.a, 2), num(r.b, 2), r.change == null ? '–' : (r.change > 0 ? '+' : '') + num(r.change, 2), r.change_pct == null ? '–' : (r.change_pct > 0 ? '+' : '') + num(r.change_pct, 2)]), [1, 2, 3, 4])}
+        ${table(['Turbine', 'Moved, m', `Wake loss, %: ${esc(c.a)}`, esc(c.b), `Net, MWh: ${esc(c.a)}`, esc(c.b), 'Change, MWh'], c.turbines.map(t => [esc(t.id), t.in !== 'both' ? esc(t.in) : (t.moved ? num(t.moved_m, 0) : '–'), num(t.wake_loss_pct.a, 2), num(t.wake_loss_pct.b, 2), num(t.p50_mwh.a, 0), num(t.p50_mwh.b, 0), t.p50_mwh.change == null ? '–' : (t.p50_mwh.change > 0 ? '+' : '') + num(t.p50_mwh.change, 0)]), [1, 2, 3, 4, 5, 6])}
+        <div class="links" style="margin-top:12px">${(c.files || []).map(f => `<a class="btn" href="${fileUrl(f)}">${f.endsWith('.csv') ? 'Download the table' : 'Download the one-page comparison'}</a>`).join('')}</div></div>` : '';
+    return card('Alternative layouts', `<p class="hint">Keep the layout you have, copy it, move turbines, run steps 4 and 5 again and set the two side by side. The earlier layout stays as it was.</p>
+      ${used ? `<p class="note">Step 4 now takes the positions of <strong>${esc(used.name)}</strong> as given. <button class="btn" type="button" data-lay="design">Let step 4 place the turbines again</button></p>` : ''}
+      <div class="field"><label for="ly-name">Name</label><div class="with-btn"><input id="ly-name" type="text" placeholder="Layout A" spellcheck="false" autocomplete="off"><button class="btn" type="button" data-lay="save"${done ? '' : ' disabled'}>Keep this layout</button></div>
+        <small>${done ? 'Keeps the positions and the results of steps 4 and 5 as they stand now.' : 'Run step 4 first: there is no up-to-date layout to keep.'}</small></div>
+      ${LY.kept.length ? table(['Kept layout', 'Turbines', 'Net P50, GWh'], rows, [1, 2]) : ''}
+      ${drafts.length ? `<details class="more"${drafts.some(x => !x.kept) ? ' open' : ''}><summary>Copy a layout and move turbines</summary>
+        <div class="row2"><div class="field"><label for="ly-from">Copy</label><select id="ly-from">${opt(drafts)}</select></div>
+          <div class="field"><label for="ly-new">as</label><div class="with-btn"><input id="ly-new" type="text" placeholder="Layout B" spellcheck="false" autocomplete="off"><button class="btn" type="button" data-lay="duplicate">Copy</button></div></div></div>
+        <div class="row2"><div class="field"><label for="ly-set">Move a turbine of</label><select id="ly-set" data-lay-set="1">${opt(drafts, laySet)}</select></div>
+          <div class="field"><label for="ly-turbine">Turbine</label><select id="ly-turbine">${((drafts.find(x => x.key === laySet) || drafts[0]).turbines).map(t => `<option>${esc(t)}</option>`).join('')}</select></div></div>
+        <div class="row2"><div class="field"><label for="ly-east">To the east, m</label><input id="ly-east" type="number" step="any" placeholder="0"><small>Negative is to the west.</small></div>
+          <div class="field"><label for="ly-north">To the north, m</label><input id="ly-north" type="number" step="any" placeholder="0"><small>Negative is to the south.</small></div></div>
+        <div class="links"><button class="btn" type="button" data-lay="move">Move it</button><button class="btn" type="button" data-lay="use-set">Use these positions in step 4</button></div>
+        <small>The positions are a GeoJSON file of points in the project's layouts folder: a GIS program can move them too.</small></details>` : ''}
+      ${LY.kept.length >= 2 ? `<div class="row2"><div class="field"><label for="ly-a">Compare</label><select id="ly-a">${opt(LY.kept, LY.kept[0].name)}</select></div>
+          <div class="field"><label for="ly-b">with</label><select id="ly-b">${opt(LY.kept, LY.kept[LY.kept.length - 1].name)}</select></div></div>
+        <div class="links"><button class="btn" type="button" data-lay="compare">Compare the two</button></div>` : ''}
+      ${cmp}`);
+  }
+  function expectedCard() {
+    const E = S.project.environment, sun = E.sunshine_share;
+    const shown = Array.isArray(sun) ? sun.join(', ') : (ok(sun) ? String(sun) : '');
+    const state = shown ? (String(shown).includes(',') ? 'Entered: twelve monthly values.' : 'Entered: one value for the whole year.') : 'Not entered: the sun is taken to shine all day, so the expected hours come out high.';
+    return card('Expected shadow flicker <small>optional</small>', `<p class="hint">Beside the worst case, each home gets expected hours a year: the rotor stands across the wind of each sector of the wind rose, the turbine runs between cut-in and cut-out, and the sun shines for the share of daylight entered here.</p>
+      <div class="field"><label for="sun-share">Share of daylight with direct sun, 0 to 1</label><input id="sun-share" type="text" value="${esc(shown)}" data-sun="1" placeholder="for example 0.6, or twelve values from January" spellcheck="false" autocomplete="off"><small><strong>${state}</strong> One value for the year, or twelve separated by commas, January first. Take them from a weather service's sunshine hours for the site.</small></div>
+      ${fNum('environment', 'flicker_budget_hours', 'Flicker budget: expected hours a year a home may have', { min: 0, placeholder: 'no budget', help: 'Over the budget, the turbines that shade the home are stopped as far as needed, and the energy this costs is reported.' })}`);
+  }
+  function modesCard() {
+    const modes = (S.project.environment.noise_modes || []).concat([{}]).slice(0, 6);
+    return card('Quiet operating modes <small>optional</small>', `<p class="hint">Enter the turbine's quiet modes as its manufacturer gives them. Step 5 then finds which turbines to run quieter so that every home is within the noise level, and what that costs in energy. Nothing entered here leaves your computer.</p>
+      ${table(['Mode', 'Sound power, dB(A)', 'Energy, % of the full mode'], modes.map((m, i) => [
+        `<input type="text" value="${esc(m.name || '')}" data-mode="${i}" data-mk="name" placeholder="Mode ${i + 1}" aria-label="Name of mode ${i + 1}">`,
+        `<input type="number" step="any" value="${ok(m.sound_power_dba) ? m.sound_power_dba : ''}" data-mode="${i}" data-mk="sound_power_dba" aria-label="Sound power of mode ${i + 1}">`,
+        `<input type="number" step="any" min="0" max="100" value="${ok(m.energy_pct) ? m.energy_pct : ''}" data-mode="${i}" data-mk="energy_pct" aria-label="Energy of mode ${i + 1}">`]))}
+      <small>The full mode is the sound power entered above, at 100 % energy. A row counts once it has both numbers; clear both to remove it.</small>`);
   }
 
   // ---------- charts ----------
@@ -249,7 +300,18 @@
       <button class="btn" type="button" data-act="reveal" data-path="">Open the project folder</button></div></div></div><div class="page">`;
     if (running) h += workingPanel() + '<div style="height:18px"></div>';
     else if (lastError) h += errorPanel() + '<div style="height:18px"></div>';
-    if (p.demo) h += card('', '<p class="note">This is the demo project. Every number in it is invented: the mast records, the terrain, the reference, the homes and the zones. No result says anything about a real site.</p>') + '<div style="height:18px"></div>';
+    if (p.demo) {
+      const doneAll = ['data', 'longterm', 'map', 'layout', 'environment'].every(k => (stepOf(k) || {}).status === 'done');
+      const kept = ((p.layouts || {}).kept || []).length;
+      h += card('Start here: ten minutes with the demo', `<p class="note">This is the demo project. Every number in it is invented: the mast records, the terrain, the reference, the homes and the zones. No result says anything about a real site. It runs without the internet.</p>
+        <ol class="steps">
+          <li><strong>${doneAll ? '✓ ' : ''}Run all six steps</strong> with the button above. It takes a few minutes.</li>
+          <li><strong>Find the planted faults.</strong> Open <a href="#" data-go="data">1. Mast data</a>: five faults were put into the records: three days with no records, a vane stuck for 30 hours, a cup dead for 20 hours, an impossible gust and an impossible standard deviation. The checks should name each with its dates.</li>
+          <li><strong>Look at the wind map and the layout.</strong> <a href="#" data-go="map">3. Wind map</a> shows where the wind is; <a href="#" data-go="layout">4. Layout and energy</a> places ten turbines and gives the energy with its uncertainty.</li>
+          <li><strong>Change the layout and see what it costs.</strong> In step 4, under Alternative layouts, the layout is kept as “Baseline” and a copy, “Try a change”, has three turbines moved. Use its positions, run steps 4 and 5, keep the result and compare the two${kept >= 2 ? ' (you have kept ' + kept + ' layouts)' : ''}.</li>
+          <li><strong>Open a report.</strong> Each step writes Word reports; the buttons are under the results of step 4.</li>
+        </ol>`) + '<div style="height:18px"></div>';
+    }
     h += '<div class="ladder">' + ORDER.map(key => {
       const st = stepOf(key), m = STEP[key];
       return `<button type="button" class="${st.status}" data-go="${key}"><span class="n">${st.status === 'done' ? '✓' : m.n}</span><span><b>${m.title}</b><span class="sum">${esc(sumLine(key, st.result))}</span></span>${pill(st)}</button>`;
@@ -314,6 +376,12 @@
              <div class="row2">${fNum('layout', 'rules.receptor_setback_m', 'Setback from homes, m', { min: 0 })}${fNum('layout', 'rules.exclusion_buffer_m', 'Buffer round zones, m', { min: 0 })}</div>
              <div class="row2">${fNum('layout', 'rules.line_buffer_m', 'Buffer along lines, m', { min: 0 })}${fNum('layout', 'rules.slope_max_pct', 'Steepest ground, %', { min: 1, max: 60 })}</div>
              <div class="row2">${fNum('layout', 'rules.radius_km', 'Search within, km of mast', { min: 1, max: 30 })}${fNum('layout', 'rules.min_mean_ws', 'Lowest wind speed, m/s', { placeholder: 'no limit', min: 0 })}</div></details>`)
+        + layoutsCard()
+        + card('Cost of energy <small>optional</small>', `<p class="hint">A first figure for comparing layouts, from costs you enter. It is not a financial model: no tax, debt, inflation or grid charges.</p>
+            <div class="row2">${fNum('layout', 'costs.capex_per_mw', 'Capital cost, per MW installed', { min: 0, placeholder: 'not entered: no cost of energy' })}${fNum('layout', 'costs.opex_per_mw_year', 'Running cost, per MW and year', { min: 0, placeholder: '0' })}</div>
+            <div class="row2">${fNum('layout', 'costs.link_per_m', 'Cables and roads, per metre', { min: 0, placeholder: '0', help: 'Costed along the shortest route linking the turbines.' })}${fText('layout', 'costs.currency', 'Currency', { placeholder: 'USD' })}</div>
+            <div class="row2">${fNum('layout', 'costs.years', 'Life, years', { min: 1, max: 60, placeholder: '25' })}${fNum('layout', 'costs.discount_pct', 'Discount rate, %', { min: 0, max: 40, placeholder: '8' })}</div>
+            ${fSelect('layout', 'objective', 'Fine-tuning aims at', [['energy', 'Most energy'], ['cost', 'Lowest cost of energy (needs the capital cost)']])}`)
         + card('Spacing, wakes and losses', `<div class="row2">${fNum('layout', 'cross_d', 'Across the wind, rotors', { min: 1.5, max: 15 })}${fNum('layout', 'along_d', 'Along the wind, rotors', { min: 1.5, max: 20 })}</div>
             ${fNum('layout', 'link_m', 'Keep every turbine within, m of another', { placeholder: 'no limit', min: 0, help: 'Keeps the wind farm in one piece for roads and cables.' })}
             ${fSelect('layout', 'wake', 'Wake model', S.app.wake_models.map(w => [w.key, w.name]))}
@@ -324,7 +392,8 @@
       return card('Limits to screen against', `<div class="row2">${fNum('environment', 'sound_power_dba', 'Sound power per turbine, dB(A)', { min: 85, max: 120 })}${fNum('environment', 'noise_limit_dba', 'Noise level at homes, dB(A)', { min: 20, max: 80 })}</div>
         <div class="row2">${fNum('environment', 'flicker_hours_limit', 'Flicker, hours a year', { min: 0 })}${fNum('environment', 'flicker_minutes_limit', 'Flicker, minutes a day', { min: 0 })}</div>
         ${fNum('environment', 'year', 'Year for the sun positions', { min: 1950, max: 2099, step: 1 })}
-        <p class="hint">Set the limits to what applies at the site. The defaults are common screening values, not a statement of any country's rules.</p>`);
+        <p class="hint">Set the limits to what applies at the site. The defaults are common screening values, not a statement of any country's rules.</p>`)
+        + expectedCard() + modesCard();
     },
     pack() {
       const env = stepOf('environment');
@@ -460,6 +529,7 @@
           ${tile('P90, 10-year average', `${num(u.p90_10_year, 0)} <small>GWh</small>`, `P75 ${num(u.p75_10_year, 0)} GWh`)}
           ${tile('P90, any one year', `${num(u.p90_1_year, 0)} <small>GWh</small>`, `uncertainty ${num(u.sigma_pct['1_year'], 1)} % of energy`)}
           ${tile('Gross energy', `${num(r.gross_gwh, 0)} <small>GWh a year</small>`, 'before wakes and losses')}
+          ${r.cost && r.cost.cost_of_energy_per_mwh ? tile('Cost of energy, first figure', `${num(r.cost.cost_of_energy_per_mwh, 1)} <small>${esc(r.cost.currency)} per MWh</small>`, `${num(r.cost.link_m / 1000, 1)} km of cables and roads; not a financial model`) : ''}
           ${tile('Wind at the turbines', `${num(r.mean_free_ws, 2)} <small>m/s</small>`, `mean at ${num(t.hub_m, 0)} m; mast ${num(r.mast_mean_ws, 2)} m/s`)}
         </div>
         ${(r.warnings || []).length ? card(`${ICON.warn}Check before relying on this`, list(r.warnings), 'warnbox') : ''}
@@ -499,6 +569,9 @@
           ${tile('Homes over a flicker limit', `${num(fl.over_limit, 0)} <small>of ${num(fl.n_receptors, 0)}</small>`, `${num(fl.with_any_flicker, 0)} could see any flicker`)}
           ${tile('Most flicker, worst case', `${num(fl.highest_hours, 0)} <small>h a year</small>`, `longest day ${num(fl.highest_minutes_day, 0)} min`)}
           ${tile('Cost of stopping for flicker', `${num(fl.shutdown_upper_bound_pct, 2)} <small>%</small>`, 'of operating time, at most')}
+          ${fl.expected ? tile('Most flicker, expected', `${num(fl.expected.highest_hours, 0)} <small>h a year</small>`, fl.expected.sunshine_entered ? 'with the sunshine share entered' : 'no sunshine share entered: sun all day') : ''}
+          ${fl.budget ? tile('Keeping to the flicker budget', `${num(fl.budget.shutdown_loss_pct, 2)} <small>% of energy</small>`, `${num(fl.budget.homes_over, 0)} homes over ${num(fl.budget.hours, 0)} h a year`) : ''}
+          ${nz.quiet_modes ? tile('Quiet modes', `${num(nz.quiet_modes.energy_loss_pct, 2)} <small>% of energy</small>`, nz.quiet_modes.within_limit ? `${num(nz.quiet_modes.turbines_in_quiet_mode, 0)} turbines run quieter; every home within the level` : `${num(nz.quiet_modes.homes_over_after, 0)} homes stay over the level with these modes`) : ''}
         </div>
         <div class="maps2">
           <a href="${fileUrl(r.noise_map, st.result.at)}" target="_blank" rel="noopener"><img class="map" src="${fileUrl(r.noise_map, st.result.at)}" alt="Map of turbine noise with the homes"></a>
@@ -652,6 +725,25 @@
       });
       return;
     }
+    const ly = e.target.closest('[data-lay]');
+    if (ly) {
+      const val = id => { const x = $('#' + id); return x ? x.value.trim() : ''; };
+      const what = ly.dataset.lay;
+      const body = what === 'save' ? { action: 'save', name: val('ly-name') || 'Layout A' }
+        : what === 'duplicate' ? { action: 'duplicate', name: val('ly-from'), new: val('ly-new') || 'Layout B' }
+        : what === 'move' ? { action: 'move', name: val('ly-set'), turbine: val('ly-turbine'), east: Number(val('ly-east') || 0), north: Number(val('ly-north') || 0) }
+        : what === 'use' ? { action: 'use', name: ly.dataset.name }
+        : what === 'use-set' ? { action: 'use', name: val('ly-set') }
+        : what === 'design' ? { action: 'design' }
+        : { action: 'compare', a: val('ly-a'), b: val('ly-b') };
+      act(async () => {
+        S = await api('/api/layout', body);
+        if (what === 'duplicate') laySet = (S.project.layouts.sets.find(x => x.name === body.new || x.key === body.new.replace(/[^A-Za-z0-9_-]+/g, '-')) || {}).key || laySet;
+        toast(what === 'save' ? `Kept as ${body.name}.` : what === 'duplicate' ? `Copied as ${body.new}. Move its turbines, then use its positions in step 4.` : what === 'move' ? `${body.turbine} moved. Use these positions in step 4, then run steps 4 and 5.` : what === 'compare' ? 'Compared.' : what === 'design' ? 'Step 4 places the turbines itself again. Run steps 4 and 5.' : 'Step 4 takes these positions as given. Run steps 4 and 5.');
+        render(true);
+      });
+      return;
+    }
     const a = e.target.closest('[data-act]');
     if (!a) return;
     const what = a.dataset.act;
@@ -704,6 +796,21 @@
       const state = r => (!r.from && !r.to) ? 'empty' : (r.from && r.to && r.minutes !== '') ? 'full' : 'part';
       if (rows.some(r => state(r) === 'part')) return;            // a period half written in: wait for the rest
       saveSettings('data', { clock_corrections: rows.filter(r => state(r) === 'full').map(r => ({ ...r, minutes: Number(r.minutes) })) }, true);
+      return;
+    }
+    if (el.dataset.laySet) { laySet = el.value; render(true); return; }
+    if (el.id && el.id.startsWith('ly-')) return;
+    if (el.dataset.sun) {
+      const parts = el.value.split(/[,;\s]+/).filter(x => x !== '').map(Number);
+      if (parts.some(x => !isFinite(x) || x < 0 || x > 1) || ![0, 1, 12].includes(parts.length)) { toast('The sunshine share is one value from 0 to 1, or twelve of them, January first.', true); return; }
+      saveSettings('environment', { sunshine_share: parts.length === 0 ? null : parts.length === 1 ? parts[0] : parts }, true);
+      return;
+    }
+    if (el.dataset.mode !== undefined) {
+      const rows = [...main.querySelectorAll('[data-mode]')].reduce((acc, x) => { (acc[x.dataset.mode] = acc[x.dataset.mode] || {})[x.dataset.mk] = x.value; return acc; }, {});
+      const modes = Object.values(rows).filter(r => r.sound_power_dba !== '' && r.energy_pct !== '').map((r, i) => ({ name: r.name || `Mode ${i + 1}`, sound_power_dba: Number(r.sound_power_dba), energy_pct: Number(r.energy_pct) }));
+      const part = Object.values(rows).some(r => (r.sound_power_dba !== '') !== (r.energy_pct !== ''));
+      if (!part) saveSettings('environment', { noise_modes: modes }, true);
       return;
     }
     if (el.dataset.loss !== undefined) {

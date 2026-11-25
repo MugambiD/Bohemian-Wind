@@ -146,6 +146,9 @@ class App:
             st = watch.load_status(self.project)
             st["watching"] = bool(self.watch_stop and not self.watch_stop.is_set())
             out["project"]["intake"] = st
+            from .. import layouts  # noqa: PLC0415
+            out["project"]["layouts"] = {"kept": layouts.listing(self.project), "sets": layouts.sets(self.project),
+                                         "compare": getattr(self, "compare", None) if getattr(self, "compare_for", None) == str(self.project.folder) else None}
         return out
 
     # ---------- projects ----------
@@ -274,6 +277,35 @@ class App:
         else:
             self.stop_watch()
         return self.state()
+
+    def layout_action(self, body: dict) -> dict:
+        """Keep, copy, change, use and compare alternative layouts (bohemian_wind.layouts)."""
+        from .. import layouts  # noqa: PLC0415
+        action = str(body.get("action") or "")
+
+        def do(p):
+            try:
+                if action == "save":
+                    layouts.save(p, str(body.get("name") or ""))
+                elif action == "duplicate":
+                    layouts.duplicate(p, str(body.get("name") or ""), str(body.get("new") or ""))
+                elif action == "move":
+                    layouts.move(p, str(body.get("name") or ""), str(body.get("turbine") or ""),
+                                 float(body.get("east") or 0.0), float(body.get("north") or 0.0))
+                    if p.s["layout"].get("positions_file") == f"{layouts.FOLDER}/{layouts._slug(str(body.get('name')))}.geojson":
+                        p.save()
+                elif action == "use":
+                    layouts.use(p, str(body.get("name") or ""))
+                elif action == "design":
+                    layouts.design_again(p)
+                elif action == "compare":
+                    self.compare = layouts.write_comparison(p, str(body.get("a") or ""), str(body.get("b") or ""))
+                    self.compare_for = str(p.folder)
+                else:
+                    raise ProjectError(f"Unknown layout action: {action}")
+            except (layouts.LayoutError, ValueError) as e:
+                raise ProjectError(str(e)) from e
+        return self.change(do)
 
     def change(self, fn) -> dict:
         """A settings change: refused while a run or a data check holds the project."""
@@ -424,6 +456,7 @@ class Handler(BaseHTTPRequestHandler):
         routes = {
             "/api/project": lambda: app.project_action(body),
             "/api/settings": lambda: app.change(lambda p: p.update(str(body.get("section")), body.get("values") or {})),
+            "/api/layout": lambda: app.layout_action(body),
             "/api/attach": lambda: app.change(lambda p: p.attach(str(body.get("kind")), body.get("path") or "")),
             "/api/run": lambda: app.start(body.get("steps") or [body.get("step")]),
             "/api/stop": lambda: app.halt(),

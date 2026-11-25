@@ -1433,6 +1433,14 @@ class Project:
         self.path("environment", "environment.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
         out = self._store("environment", out)
         self._reports("environment", log)
+        if self.s.get("demo"):
+            from . import layouts  # noqa: PLC0415
+            try:
+                if layouts.demo_alternatives(self):
+                    log(f"  Demo: the layout is kept as '{layouts.DEMO_BASE}', with a copy '{layouts.DEMO_TRY}' in which three turbines "
+                        "are moved. Under 'Alternative layouts' in step 4, use its positions, run steps 4 and 5, keep it and compare.")
+            except Exception:  # noqa: BLE001  (a convenience of the demo: it never stops the step)
+                pass
         return out
 
     # ---------- step 6: permitting pack ----------

@@ -82,13 +82,30 @@ Filename: "{app}\python\pythonw.exe"; Parameters: "{#Start} --quit"; WorkingDir:
 Type: filesandordirs; Name: "{app}\python"
 
 [Code]
-// An installation over a running copy: ask it to stop first, so that its files can be replaced.
+// An installation over a running copy: ask it to stop first, so that its files can be replaced. A wind map being
+// computed with CFD keeps the solver programs of the installed copy open, and they cannot be replaced while they
+// run: setup then says so and stops before changing anything, instead of failing half way with a file in use.
+function SolverRunning(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := Exec(ExpandConstant('{cmd}'), '/C tasklist /NH | findstr /I "simpleFoam.exe blockMesh.exe"', '', SW_HIDE,
+                 ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
   Pythonw: String;
 begin
   Result := '';
+  if DirExists(ExpandConstant('{app}\openfoam')) and SolverRunning() then
+  begin
+    Result := 'A wind map is being computed with CFD (OpenFOAM is running). Its programs belong to the installed copy ' +
+              'and cannot be replaced while they run.' + #13#10 + #13#10 +
+              'Let the run finish, or stop it, then start this setup again. Nothing has been changed.';
+    Exit;
+  end;
   Pythonw := ExpandConstant('{app}\python\pythonw.exe');
   if FileExists(Pythonw) then
     Exec(Pythonw, '{#Start} --quit', ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode);

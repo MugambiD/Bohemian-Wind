@@ -14,8 +14,14 @@ What changed in each version of Bohemian Wind. The format follows [Keep a Change
 - An energy and wake benchmark in the validation set: one turbine, two in line with the wind, two across it, and three rows of three, on flat ground with the generic 4.5 MW turbine. Twelve more cases with answers known from the power curve, from geometry and from symmetry (23 in all), and `docs/validation/wake-benchmark-<version>.json` with the gross energy, energy after wakes and wake loss of every turbine for each of the three wake models, for anyone to set another calculation against.
 - The connector for AI assistants gains `list_layouts`, `save_layout` and `compare_layouts`.
 
+- On the screens of the application: an "Alternative layouts" panel in step 4 (keep, copy, move a turbine by metres, use the positions, compare, with the comparison shown and offered as a one-page text and a table), the costs and the aim of the fine-tuning, the sunshine share and flicker budget, and a table for the turbine's quiet modes. Each says whether a value was entered or a default is used; the sunshine share says so in bold. The results show the expected flicker, the cost of keeping to the budget, the quiet modes and the cost of energy.
+- The demo project opens with "Start here: ten minutes with the demo": run the steps, find the five planted faults, look at the wind map and layout, change the layout and compare, open a report. After steps 4 and 5 the demo keeps its layout as "Baseline" and puts a copy beside it, "Try a change", with three turbines moved, ready to run and compare. All of it works without the internet.
+
+### Changed
+- The setup program stops before changing anything, with the reason, when a wind map is being computed with CFD: the solver programs of the installed copy cannot be replaced while they run. Before, setup could fail half way with a file in use.
+
 ### Not in this version
-- No map editor: turbines are moved by command or in a GIS program. The comparison is not yet on the screens of the application.
+- No map editor: turbines are moved by metres on the screen, by command or in a GIS program.
 
 
 ## [0.3.4-dev] - 2026-11-25

@@ -107,6 +107,22 @@ def listing(project) -> list:
     return out
 
 
+def sets(project) -> list:
+    """Every set of positions in layouts/: those kept with results and the copies still being changed."""
+    folder = project.folder / FOLDER
+    names = {_slug(x["name"]): x["name"] for x in listing(project)}
+    used = str(project.s["layout"].get("positions_file") or "")
+    out = []
+    for f in sorted(folder.glob("*.geojson")) if folder.is_dir() else []:
+        try:
+            ids = [str(ft["properties"].get("name")) for ft in json.loads(f.read_text(encoding="utf-8"))["features"]]
+        except (ValueError, KeyError, TypeError):
+            continue
+        out.append({"key": f.stem, "name": names.get(f.stem, f.stem), "kept": f.stem in names, "turbines": ids,
+                    "in_use": used == f"{FOLDER}/{f.name}"})
+    return out
+
+
 def _points(project, name: str) -> tuple:
     f = _path(project, name, "geojson")
     if not f.is_file():
@@ -150,6 +166,26 @@ def design_again(project) -> None:
     """Let step 4 place the turbines itself again."""
     project.update("layout", {"positions_file": ""})
     project.save()
+
+
+DEMO_BASE, DEMO_TRY = "Baseline", "Try a change"
+
+
+def demo_alternatives(project) -> bool:
+    """In the demo project, once steps 4 and 5 have run: keep the designed layout as "Baseline" and put a copy
+    beside it, "Try a change", with three turbines moved, so that a first-time user can run it and compare the two
+    without preparing anything. Done once; never in a project of the user's own."""
+    if not project.s.get("demo") or _path(project, DEMO_BASE, "json").is_file():
+        return False
+    if project.status("layout") != "done" or project.status("environment") != "done" or project.s["layout"].get("positions_file"):
+        return False
+    base = save(project, DEMO_BASE)
+    ids = [q["id"] for q in base["positions"]]
+    if len(ids) >= 7 and not _path(project, DEMO_TRY, "geojson").exists():
+        duplicate(project, DEMO_BASE, DEMO_TRY)
+        for tid, east, north in ((ids[1], 0.0, 400.0), (ids[4], 300.0, -200.0), (ids[6], -250.0, 0.0)):
+            move(project, DEMO_TRY, tid, east, north)
+    return True
 
 
 def _change(a, b) -> dict:

@@ -213,7 +213,7 @@ def test_two_layouts_are_kept_changed_and_compared(project):
     assert "Homes over the noise level" in c["rows"] and c["rows"]["Turbines"]["change"] == 0
     text = (p.folder / c["files"][0]).read_text(encoding="utf-8")
     assert "[COMPLIANCE]" in text and "bankable" in text and ids[4] in text and "Change, %" in text
-    assert (p.folder / c["files"][1]).is_file() and [x["name"] for x in layouts.listing(p)] == ["Layout A", "Layout B"]
+    assert (p.folder / c["files"][1]).is_file() and {"Layout A", "Layout B"} <= {x["name"] for x in layouts.listing(p)}
     # another wake model for one of them: the comparison says the two no longer stand on the same footing
     p.update("layout", {"wake": "jensen075"})
     p.run("layout", log=lambda m: None)
@@ -235,3 +235,35 @@ def test_the_wake_benchmark_is_published_with_every_turbine_and_model():
     on_file = json.loads(kept.read_text(encoding="utf-8"))["cases"]
     for mine, theirs in zip(b["cases"], on_file):
         assert mine["layout"] == theirs["layout"] and mine["wake_loss_pct"] == pytest.approx(theirs["wake_loss_pct"], abs=0.01)
+
+
+def test_the_demo_comes_with_a_baseline_and_a_change_to_try_and_the_app_serves_the_layouts(tmp_path):
+    """Step 3 of the plan of 25 Nov: a fictional site with two candidate layouts, runnable offline, and the layouts
+    panel of the application behind one address."""
+    from bohemian_wind import layouts  # noqa: PLC0415
+    from bohemian_wind.app.server import App  # noqa: PLC0415
+    p = demo.open_or_create(tmp_path / "demo")
+    said = []
+    for step in STEPS[:5]:
+        p.run(step, log=said.append)
+    assert any("kept as 'Baseline'" in m for m in said)
+    sets = {s["key"]: s for s in layouts.sets(p)}
+    assert sets["Baseline"]["kept"] and not sets["Try-a-change"]["kept"] and len(sets["Try-a-change"]["turbines"]) == 10
+    p.run("environment", log=said.append)                                  # a second run does not make them again
+    assert sum("kept as 'Baseline'" in m for m in said) == 1
+    app = App()
+    app.project = Project.open(p.folder)
+    st = app.layout_action({"action": "use", "name": "Try-a-change"})
+    assert any(s["in_use"] and s["key"] == "Try-a-change" for s in st["project"]["layouts"]["sets"])
+    for step in ("layout", "environment"):
+        app.project.run(step, log=lambda m: None)
+    app.layout_action({"action": "save", "name": "Try a change"})
+    st = app.layout_action({"action": "compare", "a": "Baseline", "b": "Try a change"})
+    c = st["project"]["layouts"]["compare"]
+    assert c["rows"]["Net energy P50, GWh a year"]["change"] != 0 and len([t for t in c["turbines"] if t.get("moved")]) == 3
+    st = app.layout_action({"action": "design"})
+    assert not any(s["in_use"] for s in st["project"]["layouts"]["sets"])
+    with pytest.raises(ProjectError, match="No layout is kept"):
+        app.layout_action({"action": "compare", "a": "Baseline", "b": "nothing"})
+    with pytest.raises(ProjectError, match="Unknown layout action"):
+        app.layout_action({"action": "explode"})
