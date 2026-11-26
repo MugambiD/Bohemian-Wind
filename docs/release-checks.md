@@ -73,7 +73,13 @@ with the controls the retest asked for (`tests/test_summary_tables.py`).
 made on a real PC at that date, and the setup program that rolled back on 21 November is not yet explained: both
 stay open, and their results are to be written here when they are in.
 
-**The setup that failed on 21 November.** The likeliest cause, not proven: a CFD run had been started one minute
-before setup, and its solver programs, which belong to the installed copy, were open. Setup could not replace them
-and was ended at its "file in use" question (exit code 5). From 0.3.5-dev setup checks for a running solver first
-and stops with the reason before changing anything. A fresh attempt with no CFD running is still to be recorded.
+**The setup that failed on 21 November: explained.** Its own log shows the cause: a CFD run had been started one
+minute before setup, and the solver (blockMesh) and Python held files of the installed copy. Setup could not close
+them, ended at its "unable to close all applications" question and rolled back (exit code 5). From 0.3.5-dev setup
+checks for a running solver first and stops with the reason before changing anything.
+
+**Upgrade recorded, 26 November 2026.** On a Windows PC with 0.3.0-dev installed for the current user and no CFD
+run in progress, the published 0.3.4-dev setup program (SHA-256 checked against the published one) ended with exit
+code 0; the installed copy then reported 0.3.4-dev and passed its 11 validation cases. This is check 2 (upgrade) and
+check 3 (the version that starts, from the command line). Still open: a fresh install under a standard user, and
+checks 4 to 10 in the installed window.
