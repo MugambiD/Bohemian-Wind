@@ -69,7 +69,7 @@ with the controls the retest asked for (`tests/test_summary_tables.py`).
 | A year of wind was counted in rows: 8,760 one-minute rows, or 8,760 rows with unreadable times, passed | times are read as times; values are averaged into their hour; 8,760 different hours are needed, 90 % or more of the hours from first to last | minutes, unreadable times, short, gapped: refused; hourly and ten-minute: accepted; an hour counts once however often it was sampled |
 | A repeated row was accepted by the long-term reader and refused by the rose reader | one rule in both: the same time and the same wind is one record; the same time with different wind is refused | exact repeats accepted in both; opposite winds of one speed refused in both |
 
-0.3.2-dev was published as a preview on 23 November 2026 with these fixes, and 0.3.3-dev and 0.3.4-dev on 25 November 2026. Checks 1 to 10 above had not yet been
+0.3.2-dev was published as a preview on 23 November 2026 with these fixes, 0.3.3-dev and 0.3.4-dev on 25 November 2026, and 0.3.5-dev on 27 November 2026. Checks 1 to 10 above had not yet been
 made on a real PC at that date, and the setup program that rolled back on 21 November is not yet explained: both
 stay open, and their results are to be written here when they are in.
 

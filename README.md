@@ -17,7 +17,7 @@ Open-source software for the wind developer's workflow, built for projects in Ea
 </p>
 
 <p align="center">
-  <a href="https://github.com/MugambiD/bohemian-wind/releases/tag/v0.3.4-dev"><img alt="Download for Windows (0.3.4-dev)" src="https://img.shields.io/badge/Download_for_Windows-0.3.4--dev-008781?style=for-the-badge&logo=windows&logoColor=white" height="44"></a>
+  <a href="https://github.com/MugambiD/bohemian-wind/releases/tag/v0.3.5-dev"><img alt="Download for Windows (0.3.5-dev)" src="https://img.shields.io/badge/Download_for_Windows-0.3.5--dev-008781?style=for-the-badge&logo=windows&logoColor=white" height="44"></a>
 </p>
 <p align="center">Free. No account. Runs on your own computer; your measurements never leave it.<br>
 <a href="docs/media/bohemian-wind-demo.mp4">Watch the 2-minute demo</a> |
@@ -39,6 +39,17 @@ Open-source software for the wind developer's workflow, built for projects in Ea
 |---|---|---|
 | <img src="docs/images/app-overview.jpg" alt="Overview screen: six steps, each with its result"> | <img src="docs/images/app-wind-map.jpg" alt="Wind map step: the mean wind speed over the terrain round the mast"> | <img src="docs/images/app-layout-map.jpg" alt="Layout step: turbines inside the constraints, over the wind map"> |
 | Six steps, each with its result, marked when out of date | Mean wind speed over the terrain, also as a Google Earth file | Turbines inside your constraints, with P50, P75 and P90 |
+
+## Who is this for?
+
+People who need a first, defensible answer about a wind site before anyone pays for a bankable study:
+
+- **Small and early-stage developers** in Eastern and Southern Africa, with a mast or two, a laptop and no licence budget.
+- **Mast technicians and data managers** who need to know each month whether the logger and the instruments delivered usable data.
+- **Students and lecturers** who want to work through a whole wind project, from a logger file to a layout, with every method open to read.
+- **NGOs, county and district energy offices and community projects** weighing whether a site is worth a measurement campaign or a consultant.
+
+It is not for the energy yield assessment a lender relies on. That comes later, from an accredited assessor; this is the step before it.
 
 ## Highlights
 
@@ -111,7 +122,7 @@ Honest status of this version (0.3.5-dev). "Working" means it runs end to end an
 | Losses and P50/P90 | **Working with default assumptions** that you can edit. The uncertainty rules were set against measured masts in house, and they are still a developer's budget, not an assessor's. |
 | Shadow flicker and noise | **Working at screening level:** astronomical worst-case flicker; noise after ISO 9613-2 at one frequency. |
 | Expected flicker, flicker budget, quiet modes | **First version, new in 0.3.3-dev.** Expected flicker hours from the wind rose, running time and a sunshine share you enter; the energy cost of keeping homes to a flicker budget; quiet modes that bring homes within the noise level, from mode data you enter. Tested on invented cases with known answers; not yet compared with another program. Set on the screens of step 5. |
-| Alternative layouts compared | **First version, new in 0.3.5-dev (on main, not yet in a download).** Keep a layout under a name, copy it, move turbines, run it and set the two side by side: energy, wake loss, cost of energy and homes affected, in amounts and percentages, turbine by turbine. On the screens of step 4, from the command line and for AI assistants. Turbines are moved by metres or in a GIS program: there is no map editor yet. |
+| Alternative layouts compared | **First version, new in 0.3.5-dev.** Keep a layout under a name, copy it, move turbines, run it and set the two side by side: energy, wake loss, cost of energy and homes affected, in amounts and percentages, turbine by turbine. On the screens of step 4, from the command line and for AI assistants. Turbines are moved by metres or in a GIS program: there is no map editor yet. |
 | Cost of energy | **First version, new in 0.3.3-dev.** A first cost of energy from costs you enter, with cables and roads along the shortest tree; the layout can be fine-tuned for it. A figure for comparing layouts, not a financial model and not a full optimiser. |
 | Use by AI assistants and scripts | **First version, new in 0.3.3-dev.** Every step runs from the command line; each project keeps a provenance record; a connector lets an AI assistant run steps and read results on your computer. No AI takes part in any calculation. See [AI and your data](docs/ai-and-data.md). |
 | Your own exclusion zones and buffers | **Working.** GeoJSON, KML, KMZ or CSV; buffers round zones, along lines and from homes; slope and elevation limits. |

@@ -6,7 +6,7 @@ What changed in each version of Bohemian Wind. The format follows [Keep a Change
 
 ## [Unreleased]
 
-## [0.3.5-dev] - 2026-11-25
+## [0.3.5-dev] - 2026-11-27
 
 ### Added
 - Alternative layouts, kept and compared (`bohemian-wind layout ...`). Keep the project's layout under a name, copy its positions, move turbines by metres (or edit the copy in a GIS program: it is a GeoJSON file of points), have step 4 take the copy as given, run steps 4 and 5, keep the result and compare the two. The comparison gives turbines, capacity, gross energy, wake loss, other losses, net P50, P90, cost of energy and homes affected by noise and flicker, each as an amount and a percentage; which turbines moved and how far; and every turbine's free wind, wake loss and net energy in both. It is written as a one-page text and a table in the project's `layouts/` folder.
